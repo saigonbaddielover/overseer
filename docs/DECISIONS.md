@@ -298,10 +298,11 @@ record.
   old `_h_is_busy` behaviour for that pane, and a spurious match degrades to plain `_h_running`. Neither
   is worse than shipping either predicate alone.
 - One extra `capture-pane` per pane, and only when the transcript says running but no tool is in flight.
-- `cmd_wait` still uses bare `_h_running`, so `wait` on a pane whose turn was interrupted blocks until
-  its timeout instead of returning idle. Left alone deliberately: `wait`'s contract is "block until this
-  turn ends", the timeout bounds it, and a mid-wait interrupt would need the same veto inside
-  `_wait_drained` — a larger change than the status fix this ADR covers.
+- `cmd_wait` used bare `_h_running`, so `wait` on a pane whose turn was interrupted blocked until its
+  timeout. Deferred in 0.35.0 and **closed in 0.36.0** by putting the same veto inside `_wait_drained`,
+  debounced: the screen is sampled on the loop's existing every-8th-iteration cadence and four
+  *consecutive* spinner-free samples (~8s) are required before the turn is called drained. `wait` returns
+  early only on sustained silence, so a momentary render gap cannot cut a live turn short.
 
 ### Revisit this decision if
 

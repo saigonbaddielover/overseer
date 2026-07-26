@@ -173,7 +173,7 @@ _wait_queued_reply() {
   return 1
 }
 _wait_drained() {
-  local kind="$1" path="$2" timeout="${3:-600}" pane="$4" i=0 cur sig last='' stable=0 running=1
+  local kind="$1" path="$2" timeout="${3:-600}" pane="$4" i=0 cur sig last='' stable=0 running=1 quiet=0
   local deadline=$((SECONDS + timeout))
   while [ "$SECONDS" -lt "$deadline" ]; do
     if [ -n "$pane" ]; then
@@ -183,6 +183,9 @@ _wait_drained() {
           _h_running "$kind" "$path" || return 0
           return 3
         fi
+        if [ "$running" = 1 ] && ! _queued "$pane" && ! _thinking "$pane"; then
+          quiet=$((quiet + 1)); [ "$quiet" -ge 4 ] && return 0
+        else quiet=0; fi
       fi
     fi
     sig=$(_file_sig "$path")
