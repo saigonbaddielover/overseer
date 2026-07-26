@@ -26,6 +26,8 @@ if [ "${BASH_VERSINFO[0]:-0}" -lt 4 ] || { [ "${BASH_VERSINFO[0]}" -eq 4 ] && [ 
 fi
 
 _dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+OVERSEER_SELF="$_dir/$(basename "${BASH_SOURCE[0]}")"
+export OVERSEER_SELF
 # shellcheck source=lib/discovery.sh
 . "$_dir/lib/discovery.sh"
 # shellcheck source=lib/transcript.sh
@@ -69,10 +71,11 @@ main() {
       printf '  read  <t>                  agent: last user prompt + last assistant reply (from transcript)\n'
       printf '  peek  [raw|-e] <t> [lines] full current screen (raw: keep colors -> see active tab/selection; [lines] applies to plain only)\n'
       printf '  chat  [--yes] <t> <msg|-> [timeout]  agent: send, wait for the reply, print it (queues behind a busy/compacting agent, waits for ITS OWN turn)\n'
-      printf '  send  [--yes] <t> <msg|->  agent: paste + verify + submit, confirm the turn started (no reply wait); queues + says so if the agent is busy/compacting\n'
+      printf '  send  [--yes] [--notify] <t> <msg|-> [notify_timeout]  agent: paste + verify + submit, confirm the turn started (no reply wait); queues + says so if the agent is busy/compacting\n'
+      printf '        --notify also arms a detached watcher: when that agent leaves its turn (done / stopped at a prompt / died) it PASTES a wake-up into the pane you ran this from, so a dispatcher does not have to sit and poll\n'
       printf '  wait  <t> [timeout]        agent: block until the turn finishes\n'
-      printf '  fleet [--hosts|--tailscale [--os NAME]] [-u USER] [status|read|wait [--any]|send|chat] [args]  every LOCAL agent pane at once (default status; send/chat broadcast); with --hosts/--tailscale also fan out over the inventory hosts (each runs "on <host> fleet")\n'
-      printf '        wait fans a per-pane wait over all panes; wait --any returns as soon as the FIRST in-flight pane finishes/awaits/exits (for a poll loop). a fleet-wide send/chat first PREVIEWS which idle agents would receive it and asks once before sending; --dry-run stops after the preview, --yes skips it (scripts)\n'
+      printf '  fleet [--hosts|--tailscale [--os NAME]] [-u USER] [status|read|wait [--any]|send [--notify]|chat] [args]  every LOCAL agent pane at once (default status; send/chat broadcast); with --hosts/--tailscale also fan out over the inventory hosts (each runs "on <host> fleet")\n'
+      printf '        wait fans a per-pane wait over all panes; wait --any returns as soon as the FIRST in-flight pane finishes/awaits/exits (for a poll loop); send --notify arms one watcher per pane instead, so you go idle and get woken. a fleet-wide send/chat first PREVIEWS which idle agents would receive it and asks once before sending; --dry-run stops after the preview, --yes skips it (scripts)\n'
       printf '  quit  <t>                  agent: exit the TUI (claude Ctrl-C x2, codex x1), reveal the shell, keep tmux\n'
       printf '  slash <t> </cmd>           agent: run a slash command (/model /status ...; claude /resume /clear ...)\n'
       printf '  menu  <t> <item> [nav-key] any pane: navigate a tab/menu until <item> is highlighted (default key Right; codex popups are vertical -> pass Down)\n'

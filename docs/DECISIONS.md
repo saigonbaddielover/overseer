@@ -192,3 +192,67 @@ capability meant a new top-level command. The goal: **one verb vocabulary across
   them for top-level commands — the same convention the `hosts` remediation tables use.
 - ADR-0003's "keep the `win*` symmetry" naming note is moot: the verbs are now literally shared, not
   mirrored.
+
+## ADR-0005 — Push completion back to the dispatcher with a detached watcher, not a daemon or a hook
+
+**Status:** Accepted (2026-07-26).
+
+### Context
+
+Every mechanism overseer had for learning that a worker finished is **pull**: `chat` blocks the
+dispatcher's turn on the reply, `wait` and `fleet wait --any` block it on the worker. That works for a
+short round-trip and fails for a long one — and not because an agent "forgets to look". A Claude Code
+session has **no inbound channel**: the only way in is keystrokes into its pane. Once the dispatching
+agent's turn ends it is unreachable until a human types, so a `send` for a long job is never collected
+and the user is left believing someone is watching. The ask was to invert this: the worker should cause
+the dispatcher to be told.
+
+### Options considered
+
+1. **Detached watcher armed by `send --notify` (chosen).** `setsid` a child that runs `wait <worker>`
+   and then `send <dispatcher-pane>`. Pure composition of two existing commands; the dispatcher's pane
+   comes free from `$TMUX_PANE`.
+2. **A `Stop` hook on the worker that notifies.** Event-driven with no poll, but Claude-only (Codex has
+   no hooks), and it needs a "return address" persisted per worker session — new on-disk state that
+   ADR-0002 names as a trigger to revisit the whole packaging decision.
+3. **A supervisor daemon** tracking dispatches and fanning out notifications. Rejected outright: a
+   long-lived process and a state store, in a tool whose entire design is one-shot and stateless
+   (ADR-0001/0002).
+4. **Block the dispatcher's own `Stop` hook** while any dispatched worker is in flight, forcing it to
+   keep waiting. Unforgettable by construction, but it holds the user's session hostage for the whole
+   job — the opposite of "go idle and be woken", which is what was actually wanted.
+
+### Decision
+
+Option 1. The watcher is not a daemon: it is one short-lived process per dispatch, bounded by
+`[notify_timeout]`, that exits after a single wake-up. It adds **no state, no protocol, and no hook** —
+and because it drives `wait`, it inherits everything `wait` already knows: the `Stop`-hook accelerator
+where present, the awaiting-prompt and died-mid-turn results, and Codex support that a hook-based design
+could not have.
+
+### Consequences
+
+- The wake-up is a **doorbell, not a mailbox**. An agent holds one queued message, so a second worker
+  finishing while the dispatcher is busy has its notice refused. The text therefore carries an
+  instruction to survey the whole fleet rather than the payload of one pane, which makes a dropped
+  duplicate harmless. This is a deliberate reliability trade, not an oversight.
+- **A stale `idle` cannot be trusted.** A freshly `start`ed worker has no transcript for its first
+  seconds, and a turn whose start `send` could not confirm inside its 10s budget also reads idle — both
+  made a naive watcher fire immediately (found in live testing, not by the unit tests). The watcher
+  re-waits through "no transcript yet", and when the start was unconfirmed it re-waits through a 30s
+  startup grace before believing `idle`; a confirmed start skips the grace entirely.
+- Delivery clears the target's input box, so a wake-up destroys anything half-typed in the dispatcher's
+  pane. Accepted: that pane belongs to the driving agent, and the user types to the dispatcher only
+  while it is idle.
+- Local only. The pane to wake is identified by `$TMUX_PANE` on this machine, so the flag is refused
+  outside tmux, refused when it would wake its own target, and refused on the `--hosts`/`--tailscale`
+  fan-out.
+- Each wake-up costs a real turn in the dispatcher's session — the price of push, and the reason the
+  flag is opt-in per dispatch rather than the default for `send`.
+
+### Revisit this decision if
+
+- Dispatch volume makes one watcher process per job wasteful (a single multiplexing watcher would then
+  be worth its state).
+- Claude Code grows a real inbound channel (an API, a "resume with this message" primitive), which would
+  make the keystroke round-trip unnecessary.

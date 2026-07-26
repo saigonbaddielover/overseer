@@ -50,16 +50,58 @@ cmd_keys() {
   tmux send-keys -t "$pane" "$@"
   printf 'sent keys to %s: %s\n' "$pane" "$*"
 }
+_notify_back() {
+  [ -n "${TMUX_PANE:-}" ] || return 1
+  printf '%s' "$TMUX_PANE"
+}
+_notify_script() {
+  cat <<'EOS'
+set -u
+end=$(( $(date +%s) + OVS_TIMEOUT ))
+grace=$(( $(date +%s) + 30 ))
+while :; do
+  left=$(( end - $(date +%s) ))
+  if [ "$left" -le 5 ]; then out="the worker never started the turn within ${OVS_TIMEOUT}s"; break; fi
+  out=$("$OVS_SELF" wait "$OVS_TARGET" "$left" 2>&1 | head -c 1200)
+  [ "$OVS_STARTED" = 1 ] && break
+  case "$out" in
+    *'no transcript yet'*) : ;;
+    idle) [ "$(date +%s)" -ge "$grace" ] && break ;;
+    *) break ;;
+  esac
+  sleep 2
+done
+"$OVS_SELF" send --yes "$OVS_BACK" "[overseer] wake-up from the worker you dispatched to: $OVS_TARGET ($OVS_KIND).
+
+--- overseer wait $OVS_TARGET reported:
+$out
+---
+
+Do not act on this one pane alone: another worker may have finished while you were busy and its notice was dropped. Run 'overseer fleet status', then 'overseer read <pane>' for every idle/awaiting pane, then act or report back to the user."
+EOS
+}
+_notify_spawn() {
+  local target="$1" kind="$2" back="$3" timeout="$4" started="${5:-0}"
+  setsid env OVS_SELF="$OVERSEER_SELF" OVS_TARGET="$target" OVS_KIND="$kind" OVS_BACK="$back" \
+    OVS_TIMEOUT="$timeout" OVS_STARTED="$started" bash -c "$(_notify_script)" </dev/null >/dev/null 2>&1 &
+  disown 2>/dev/null || true
+  printf 'notify: watching %s; %s will be woken when its turn ends (or after %ss)\n' "$target" "$back" "$timeout"
+}
 cmd_send() {
   _need tmux
-  local confirm=1
-  while :; do case "${1:-}" in --yes) confirm=0; shift ;; *) break ;; esac; done
+  local confirm=1 notify=0
+  while :; do case "${1:-}" in --yes) confirm=0; shift ;; --notify) notify=1; shift ;; *) break ;; esac; done
   local target="${1:-}" msg
-  [ -n "$target" ] || _die "usage: overseer send [--yes] <pane|session> <message|->"
+  [ -n "$target" ] || _die "usage: overseer send [--yes] [--notify] <pane|session> <message|-> [notify_timeout_s]"
   msg=$(_read_msg "${2:-}")
-  [ -n "$msg" ] || _die "usage: overseer send [--yes] <pane|session> <message|->  (empty message)"
+  [ -n "$msg" ] || _die "usage: overseer send [--yes] [--notify] <pane|session> <message|-> [notify_timeout_s]  (empty message)"
+  local ntimeout="${3:-$DEFAULT_TIMEOUT}" back=''
+  if [ "$notify" = 1 ]; then _need setsid; _uint "$ntimeout"
+    back=$(_notify_back) || _die "--notify has nowhere to report back to: overseer is not running inside a tmux pane (\$TMUX_PANE is unset), so the dispatching agent has no pane id — drop --notify, or run it from the agent pane that should be woken"
+  elif [ -n "${3:-}" ]; then _die "send takes a [timeout] only with --notify (it never waits for the reply itself — use chat for that)"; fi
   local ctx pane kind path; ctx=$(_target_ctx "$target") || _die "no agent pane (claude/codex) for target: $target (if the session is split, target the pane id %N — see: overseer list)"
   IFS=$'\t' read -r pane kind path <<< "$ctx"
+  [ "$back" = "$pane" ] && _die "--notify would wake the pane it is dispatching to ($pane) — send to a different agent, or drop --notify"
   _lock_pane "$pane"
   { _queued "$pane" && ! _compacting "$pane"; } && { _unlock_pane; _die "a message is already queued to $pane behind its running turn (the agent holds one queued message at a time) — wait for it to run first: overseer wait $target"; }
   local base; base=$(_h_turn_count "$kind" "$path" 2>/dev/null); base="${base:-0}"
@@ -78,9 +120,12 @@ cmd_send() {
   if [ "$prequeue" = 1 ]; then
     local why="busy with its current turn"; _compacting "$pane" && why="compacting its context"
     printf 'sent to %s (QUEUED — the agent is %s):\n%s\naccepted and will run when the agent is free; await the reply: overseer wait %s [timeout]\n' "$pane" "$why" "$msg" "$target"
+    if [ "$notify" = 1 ]; then _notify_spawn "$pane" "$kind" "$back" "$ntimeout" 1; fi
     return 0
   fi
   local rc=0; path=$(_wait_started "$target" "$kind" "$path" "$base" 10 "$pane" "$sid" "$since" "$bbytes" "$prequeue") || rc=$?
+  local started=0; case "$rc" in 0|4|5) started=1 ;; esac
+  if [ "$notify" = 1 ] && [ "$rc" != 2 ]; then _notify_spawn "$pane" "$kind" "$back" "$ntimeout" "$started"; fi
   case "$rc" in
     5|4) local why="busy with its current turn"; _compacting "$pane" && why="compacting its context"
        printf 'sent to %s (QUEUED — the agent is %s):\n%s\naccepted and will run when the agent is free; await the reply: overseer wait %s [timeout]\n' "$pane" "$why" "$msg" "$target" ;;
@@ -214,8 +259,13 @@ _fleet_local() {
       else for p in "${targets[@]}"; do printf '# %s: ' "$p"; ( cmd_wait "$p" "$@" ) || true; done; fi ;;
     send|chat)
       [ "$action" = chat ] && _need jq
-      while :; do case "${1:-}" in --yes) fl+=("$1"); shift ;; *) break ;; esac; done
+      while :; do case "${1:-}" in
+        --yes) fl+=("$1"); shift ;;
+        --notify) [ "$action" = send ] || _die "fleet chat already waits for every reply — --notify belongs to fleet send"
+                  fl+=("$1"); shift ;;
+        *) break ;; esac; done
       msg="${1:-}"; [ -n "$msg" ] || _die "usage: overseer fleet $action [--yes] <message>  (broadcasts to every agent pane)"
+      local -a nt=(); { [ "$action" = send ] && [ -n "${2:-}" ]; } && nt=("$2")
       for p in "${targets[@]}"; do
         printf '===== %s =====\n' "$p"
         st=$(_fleet_status "$p" | cut -f3)
@@ -223,10 +273,10 @@ _fleet_local() {
           idle|'idle(0-turn)') : ;;
           *) printf '(skipped — %s; a broadcast only messages idle agents, so it never queues onto a busy one)\n' "$st"; continue ;;
         esac
-        if [ "$action" = send ]; then ( cmd_send ${fl[@]+"${fl[@]}"} "$p" "$msg" ) || true
+        if [ "$action" = send ]; then ( cmd_send ${fl[@]+"${fl[@]}"} "$p" "$msg" ${nt[@]+"${nt[@]}"} ) || true
         else ( cmd_chat ${fl[@]+"${fl[@]}"} "$p" "$msg" ) || true; fi
       done ;;
-    *) _die "usage: overseer fleet [--hosts|--tailscale [--os NAME]] [-u USER] [status|read|wait [--any] [timeout]|send [--yes] <msg>|chat [--yes] <msg>]  (no subcommand = status)" ;;
+    *) _die "usage: overseer fleet [--hosts|--tailscale [--os NAME]] [-u USER] [status|read|wait [--any] [timeout]|send [--yes] [--notify] <msg> [notify_timeout]|chat [--yes] <msg>]  (no subcommand = status)" ;;
   esac
 }
 _fleet_survey() {
@@ -271,7 +321,7 @@ _fleet_gate() {
 cmd_fleet() {
   _need tmux
   local remote=0 usetail=0 osfilter='' defuser="${OVERSEER_HOSTS_USER:-}"
-  local u='usage: overseer fleet [--hosts|--tailscale [--os NAME]] [-u USER] [status|read|wait [--any] [timeout]|send [--yes] [--dry-run] <msg>|chat [--yes] [--dry-run] <msg>]'
+  local u='usage: overseer fleet [--hosts|--tailscale [--os NAME]] [-u USER] [status|read|wait [--any] [timeout]|send [--yes] [--dry-run] [--notify] <msg> [notify_timeout]|chat [--yes] [--dry-run] <msg>]'
   while :; do case "${1:-}" in
     --hosts) remote=1; shift ;;
     --tailscale) remote=1; usetail=1; shift ;;
@@ -294,6 +344,7 @@ cmd_fleet() {
       while :; do case "${1:-}" in
         --yes) yes=1; shift ;;
         --dry-run) dry=1; shift ;;
+        --notify) _die "--notify wakes the dispatching agent's own tmux pane, which exists only on this machine — run it against the local fleet (overseer fleet send --notify <msg>), not with --hosts/--tailscale" ;;
         *) break ;;
       esac; done
       msg="${1:-}"
