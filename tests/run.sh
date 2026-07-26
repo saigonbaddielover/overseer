@@ -211,19 +211,49 @@ rm -f "$WAF"
 eq "fleet: no-agent-panes uses a distinct sentinel (3, not the wait-timeout code)" "3" \
    "$( ( _panes() { :; }; _need() { :; }; _fleet_local status ) >/dev/null 2>&1; echo $? )"
 
-_drain() { ( export THINK="$1" RUN="$2"
-             _awaiting() { return 1; }
-             _queued() { return 1; }
-             _is_shell() { return 1; }
-             _thinking() { return "$THINK"; }
-             _h_running() { return "$RUN"; }
-             _file_sig() { printf 'sig%s' "$SECONDS-$RANDOM"; }
-             _nap() { sleep 0.005; }
-             tmux() { printf 'node'; }
-             _wait_drained claude /nope 2 %9 ); printf '%s' "$?"; }
-eq "wait: a running transcript with no spinner drains (interrupted, not stuck)" "0" "$(_drain 1 0)"
-eq "wait: a running transcript WITH a spinner keeps waiting to timeout"         "1" "$(_drain 0 0)"
-eq "wait: a finished transcript drains regardless of the screen"                "0" "$(_drain 0 1)"
+_stubs() { _awaiting() { return 1; }
+           _is_shell() { return 1; }
+           _turn_advanced() { return 1; }
+           _h_answered() { return 1; }
+           _h_running() { return "$RUN"; }
+           _file_sig() { printf 'sig%s' "$SECONDS-$RANDOM"; }
+           _nap() { sleep 0.005; }
+           tmux() { printf 'node'; }
+           _screen_state() { case "$SCREEN" in
+             busy)     printf 'busy' ;;
+             still)    printf 'aaa' ;;
+             changing) printf 'c%s' "$((RANDOM))" ;;
+           esac; }; }
+_drain() { ( export SCREEN="$1" RUN="$2"; _stubs
+             _wait_drained "${3:-claude}" /nope 2 %9 ); printf '%s' "$?"; }
+eq "wait: a running transcript on a frozen screen drains (interrupted, not stuck)" "0" "$(_drain still 0)"
+eq "wait: a running transcript with a live spinner keeps waiting to timeout"       "1" "$(_drain busy 0)"
+eq "wait: a running transcript streaming its reply keeps waiting to timeout"       "1" "$(_drain changing 0)"
+eq "wait: a finished transcript drains regardless of the screen"                   "0" "$(_drain busy 1)"
+eq "wait: codex is exempt from the screen veto and waits out its turn"             "1" "$(_drain still 0 codex)"
+
+_wreply() { ( export SCREEN="$1" RUN="$2"; _stubs
+              case "${4:-reply}" in
+                reply)  _wait_reply "${3:-claude}" /nope 0 2 "" 0 %9 "" ;;
+                queued) _wait_queued_reply "${3:-claude}" /nope 2 %9 'msg' ;;
+              esac ); printf '%s' "$?"; }
+eq "chat: an interrupted turn reports the no-reply code instead of hanging" "4" "$(_wreply still 0)"
+eq "chat: a turn with a live spinner still waits out the timeout"           "1" "$(_wreply busy 0)"
+eq "chat: a turn streaming its reply still waits out the timeout"           "1" "$(_wreply changing 0)"
+eq "chat: a codex turn never uses the screen veto"                          "1" "$(_wreply still 0 codex)"
+eq "chat: a queued message behind an interrupted turn reports it too"       "4" "$(_wreply still 0 claude queued)"
+eq "chat: a queued message behind a live turn keeps waiting"                "1" "$(_wreply busy 0 claude queued)"
+eq "chat: a queued message behind a streaming turn keeps waiting"           "1" "$(_wreply changing 0 claude queued)"
+
+_sstate() { ( export CAP="$1" CY="${2:-9}"
+              tmux() { case "$*" in *capture-pane*) printf '%s\n' "$CAP" ;; *cursor_y*) printf '%s' "$CY" ;; esac; }
+              _screen_state %9 ); }
+eq "screen state: a live spinner reads busy" "busy" "$(_sstate '✽ Booping… (1m 5s · thinking)')"
+eq "screen state: a queued message reads busy" "busy" "$(_sstate 'Press up to edit queued messages')"
+eq "screen state: a ticking statusline below the box does not count as movement" "same" \
+   "$(a=$(_sstate "$(printf 'b1\nb2\n────\n❯ \n────\nram 0.4gb')" 3); b=$(_sstate "$(printf 'b1\nb2\n────\n❯ \n────\nram 0.9gb')" 3); [ "$a" = "$b" ] && echo same || echo differ)"
+eq "screen state: a reply streaming into the body does count as movement" "differ" \
+   "$(a=$(_sstate "$(printf 'b1\nb2\n────\n❯ \n────\nram 0.4gb')" 3); b=$(_sstate "$(printf 'b1\nb2 and more\n────\n❯ \n────\nram 0.4gb')" 3); [ "$a" = "$b" ] && echo same || echo differ)"
 
 eq "thinking: a live spinner line is in-flight"        "0" "$(_thinking_text "$(cat "$FIX/thinking-claude.txt")" >/dev/null 2>&1; echo $?)"
 eq "thinking: a completed turn shows none"             "1" "$(_thinking_text "$(cat "$FIX/thinking-none-done.txt")" >/dev/null 2>&1; echo $?)"
@@ -234,21 +264,30 @@ eq "thinking: a wrapped prose line is not in-flight"   "1" \
    "$(_thinking_text "$(printf '  the pipeline then hands the buffer to the next stage, and the reader keeps going until it sees…\n')" >/dev/null 2>&1; echo $?)"
 eq "thinking: a bare gerund spinner counts"            "0" "$(_thinking_text "$(printf '✽ Recombobulating…\n')" >/dev/null 2>&1; echo $?)"
 eq "thinking: a tool-run spinner counts"               "0" "$(_thinking_text "$(printf 'Running 1 shell command · 5s…\n')" >/dev/null 2>&1; echo $?)"
+eq "thinking: a turn past 1 minute still counts"       "0" \
+   "$(_thinking_text "$(printf '✽ Booping… (1m 5s · almost done thinking)\n')" >/dev/null 2>&1; echo $?)"
+eq "thinking: a turn past 1 hour still counts"         "0" \
+   "$(_thinking_text "$(printf '✻ Churning… (1h 2m 13s · ↓ 4.1k tokens)\n')" >/dev/null 2>&1; echo $?)"
 
+_scr() { _nap() { :; }
+         _screen_state() { case "${SCREEN:-busy}" in
+           busy) printf 'busy' ;; still) printf 'aaa' ;; changing) printf 'c%s' "$RANDOM" ;;
+         esac; }; }
 _fstat() { ( _target_ctx() { printf '%%9\tclaude\t%s' "$1"; }
              _awaiting() { return 1; }
              _compacting() { return 1; }
-             _thinking() { return "${THINK:-0}"; }
+             _scr
              _fleet_status "$1" ) | cut -f3; }
 _fstatx() { ( _target_ctx() { printf '%%9\tcodex\t%s' "$1"; }
               _awaiting() { return 1; }
               _compacting() { return 1; }
-              _thinking() { return 1; }
+              _scr
               _fleet_status "$1" ) | cut -f3; }
-eq "fleet status: a text-only turn with a live spinner reads busy, not idle" "busy" "$(THINK=0 _fstat "$RT")"
-eq "fleet status: an interrupted text-only turn reads idle, not stuck busy"  "idle" "$(THINK=1 _fstat "$RT")"
-eq "fleet status: a mid-tool turn reads busy without needing the screen"     "busy" "$(THINK=1 _fstat "$CB")"
-eq "fleet status: a finished turn reads idle"                               "idle" "$(THINK=0 _fstat "$C")"
+eq "fleet status: a text-only turn with a live spinner reads busy, not idle" "busy" "$(SCREEN=busy _fstat "$RT")"
+eq "fleet status: a text-only turn streaming its reply reads busy, not idle" "busy" "$(SCREEN=changing _fstat "$RT")"
+eq "fleet status: an interrupted text-only turn reads idle, not stuck busy"  "idle" "$(SCREEN=still _fstat "$RT")"
+eq "fleet status: a mid-tool turn reads busy without needing the screen"     "busy" "$(SCREEN=still _fstat "$CB")"
+eq "fleet status: a finished turn reads idle"                               "idle" "$(SCREEN=busy _fstat "$C")"
 eq "fleet status: codex busy is unchanged"                                  "busy" "$(_fstatx "$FIX/codex-busy.jsonl")"
 eq "fleet status: codex finished is idle"                                   "idle" "$(_fstatx "$X")"
 eq "fleet status: codex aborted is idle, not stuck busy"                    "idle" "$(_fstatx "$FIX/codex-aborted.jsonl")"

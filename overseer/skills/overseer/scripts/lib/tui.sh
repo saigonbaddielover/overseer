@@ -76,12 +76,7 @@ _compacting() {
   _compacting_text "$cap"
 }
 _thinking_text() {
-  printf '%s\n' "$1" | grep -qE '…[[:space:]]*\([0-9]+s|^[[:space:]]*[^[:space:]].{0,58}…[[:space:]]*$'
-}
-_thinking() {
-  local pane="$1" cap
-  cap=$(tmux capture-pane -p -t "$pane" 2>/dev/null) || return 1
-  _thinking_text "$cap"
+  printf '%s\n' "$1" | grep -qE '…[[:space:]]*\([0-9]+[hms]|^[[:space:]]*[^[:space:]].{0,58}…[[:space:]]*$'
 }
 _queued_text() {
   printf '%s\n' "$1" | grep -qF 'Press up to edit queued messages'
@@ -90,6 +85,15 @@ _queued() {
   local pane="$1" cap
   cap=$(tmux capture-pane -p -t "$pane" 2>/dev/null) || return 1
   _queued_text "$cap"
+}
+_screen_state() {
+  local pane="$1" cap cy
+  cap=$(tmux capture-pane -p -t "$pane" 2>/dev/null) || { printf 'busy'; return 0; }
+  { _thinking_text "$cap" || _queued_text "$cap"; } && { printf 'busy'; return 0; }
+  cy=$(tmux display-message -p -t "$pane" '#{cursor_y}' 2>/dev/null)
+  case "$cy" in ''|*[!0-9]*) cy=0 ;; esac
+  [ "$cy" -gt 1 ] && cap=$(printf '%s\n' "$cap" | head -n "$((cy - 1))")
+  printf '%s' "$cap" | cksum | tr -d ' '
 }
 _undelivered() {
   local pane="$1" target="$2" q

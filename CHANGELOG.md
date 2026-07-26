@@ -5,6 +5,36 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.37.0] - 2026-07-26
+
+### Fixed
+
+- **`wait` and `fleet status` could call a live turn idle, and `chat` could abandon one mid-reply.**
+  0.35.0 and 0.36.0 read "is this turn in flight?" off Claude's spinner line. Two live measurements say
+  that is the wrong thing to look at. Claude **stops drawing the status row once it starts rendering the
+  reply text**: a 181s turn showed a spinner for ~87s and nothing for the ~94s it spent writing. And the
+  elapsed field changes shape at one minute (`(47s · thinking)` → `(1m 5s · thinking)`), which
+  `_thinking_text`'s `\([0-9]+s` did not match — so every turn past 60s read as spinner-free anyway.
+  Together: `wait` returned `idle` on a running agent, `fleet status` showed it `idle`, and `chat` gave
+  up while the reply was still streaming.
+- The veto now keys on **screen movement** instead. `_screen_state` returns `busy` (spinner or queued
+  hint on screen) or a checksum of the pane **above the input box** — the cursor row locates the box, so
+  the ticking statusline below it is excluded. A turn is called interrupted only after four *consecutive*
+  samples that are both not-`busy` and byte-identical: a thinking turn moves its spinner, a streaming
+  turn moves its text, an interrupted turn moves nothing. `_agent_busy` uses the same evidence with a
+  two-sample check.
+- `_thinking_text` now matches the whole elapsed format (`(47s`, `(1m 5s`, `(1h 2m 13s`), with tests
+  pinning the minute and hour forms.
+
+### Added
+
+- **`chat` stops instead of hanging when the turn it is waiting on is interrupted.** `_wait_reply` and
+  `_wait_queued_reply` now return **rc=4** on the same evidence `wait` uses, and `chat` reports that the
+  turn stopped without producing a reply and points at `peek`. It is a distinct code because there is no
+  reply to print — that is neither the timeout (rc=1) nor a pane that dropped to a shell (rc=3).
+- The screen veto is Claude-only. Codex writes `turn_aborted` into its rollout, so `_cx_is_busy` already
+  reads an aborted turn as idle and never needs the screen; `wait`/`chat` on a Codex pane are unchanged.
+
 ## [0.36.0] - 2026-07-26
 
 ### Fixed
