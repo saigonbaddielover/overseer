@@ -1,0 +1,24 @@
+
+  First, file descriptors as small integers. A process refers to its open objects by index, not by name or handle type, so there is nothing to teach a program about the nature of its input. Second,
+  device-independent I/O: a disk file, a terminal, and a paper-tape punch were already the same interface, so a pipe could join that set without any program noticing. Third, the standard input /
+  standard output convention — that a well-behaved utility reads from descriptor 0 and writes to descriptor 1 by default. That last one is a coding convention, not a mechanism, and it is the part that
+  made pipes useful rather than merely possible. A pipe() call in a system where every program insisted on filenames would have been a curiosity.
+
+  The implementation was correspondingly cheap. In Sixth Edition Unix a pipe was literally a small file: the kernel allocated an inode on the root device and used 4,096 bytes of it as a circular
+  buffer, with read and write offsets chasing each other. The semantics fell out of that buffer almost mechanically, and they are the semantics we still have. A write to a full pipe blocks. A read
+  from an empty pipe blocks. A read returns zero — end of file — when the last write descriptor is closed. And a write to a pipe with no reader raises SIGPIPE, which by default kills the writer.
+
+  That final rule is worth pausing on, because it is what makes yes | head -5 terminate instead of running forever. Backpressure and termination in a Unix pipeline are not managed by any coordinator;
+  they are consequences of blocking writes and a fatal signal. The shell's part is just fork, two dup2 calls, and exec.
+
+  The philosophy pipes created
+
+  Pipes did not merely add a feature; they created an aesthetic, because they made small programs more valuable than large ones for the first time. A program that did one transformation well was now a
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ctx: 5%/1M | ram: 0.4/0.6gb | tss(3): 4.0gb | 277:/sgbl-overseer
+  Opus 5 (1M context) | effort:xhigh | think:on
+  5h: 3% - 4h30m | W: 70% - 3d | main
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents

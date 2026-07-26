@@ -209,13 +209,18 @@ cmd_wait() {
     *) _die "timeout after ${timeout}s" ;;
   esac
 }
+_agent_busy() {
+  local kind="$1" path="$2" pane="$3"
+  _h_is_busy "$kind" "$path" && return 0
+  _h_running "$kind" "$path" && _thinking "$pane"
+}
 _fleet_status() {
   local pane="$1" ctx kind path state
   ctx=$(_target_ctx "$pane") || { printf '%s\t?\t(not an agent)\n' "$pane"; return 0; }
   IFS=$'\t' read -r pane kind path <<< "$ctx"
   if _awaiting "$pane" >/dev/null 2>&1; then state=awaiting
   elif _compacting "$pane"; then state=compacting
-  elif [ -n "$path" ] && [ -f "$path" ] && _h_is_busy "$kind" "$path"; then state=busy
+  elif [ -n "$path" ] && [ -f "$path" ] && _agent_busy "$kind" "$path" "$pane"; then state=busy
   elif [ -n "$path" ] && [ -f "$path" ]; then state=idle
   else state='idle(0-turn)'; fi
   printf '%s\t%s\t%s\n' "$pane" "$kind" "$state"

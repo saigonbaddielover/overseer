@@ -211,6 +211,34 @@ rm -f "$WAF"
 eq "fleet: no-agent-panes uses a distinct sentinel (3, not the wait-timeout code)" "3" \
    "$( ( _panes() { :; }; _need() { :; }; _fleet_local status ) >/dev/null 2>&1; echo $? )"
 
+eq "thinking: a live spinner line is in-flight"        "0" "$(_thinking_text "$(cat "$FIX/thinking-claude.txt")" >/dev/null 2>&1; echo $?)"
+eq "thinking: a completed turn shows none"             "1" "$(_thinking_text "$(cat "$FIX/thinking-none-done.txt")" >/dev/null 2>&1; echo $?)"
+eq "thinking: an interrupted turn shows none"          "1" "$(_thinking_text "$(cat "$FIX/thinking-none-interrupted.txt")" >/dev/null 2>&1; echo $?)"
+eq "thinking: the stale 'Brewed for' summary is not in-flight" "1" \
+   "$(_thinking_text "$(printf 'Brewed for 12s · 3 shells still running\n')" >/dev/null 2>&1; echo $?)"
+eq "thinking: a wrapped prose line is not in-flight"   "1" \
+   "$(_thinking_text "$(printf '  the pipeline then hands the buffer to the next stage, and the reader keeps going until it sees…\n')" >/dev/null 2>&1; echo $?)"
+eq "thinking: a bare gerund spinner counts"            "0" "$(_thinking_text "$(printf '✽ Recombobulating…\n')" >/dev/null 2>&1; echo $?)"
+eq "thinking: a tool-run spinner counts"               "0" "$(_thinking_text "$(printf 'Running 1 shell command · 5s…\n')" >/dev/null 2>&1; echo $?)"
+
+_fstat() { ( _target_ctx() { printf '%%9\tclaude\t%s' "$1"; }
+             _awaiting() { return 1; }
+             _compacting() { return 1; }
+             _thinking() { return "${THINK:-0}"; }
+             _fleet_status "$1" ) | cut -f3; }
+_fstatx() { ( _target_ctx() { printf '%%9\tcodex\t%s' "$1"; }
+              _awaiting() { return 1; }
+              _compacting() { return 1; }
+              _thinking() { return 1; }
+              _fleet_status "$1" ) | cut -f3; }
+eq "fleet status: a text-only turn with a live spinner reads busy, not idle" "busy" "$(THINK=0 _fstat "$RT")"
+eq "fleet status: an interrupted text-only turn reads idle, not stuck busy"  "idle" "$(THINK=1 _fstat "$RT")"
+eq "fleet status: a mid-tool turn reads busy without needing the screen"     "busy" "$(THINK=1 _fstat "$CB")"
+eq "fleet status: a finished turn reads idle"                               "idle" "$(THINK=0 _fstat "$C")"
+eq "fleet status: codex busy is unchanged"                                  "busy" "$(_fstatx "$FIX/codex-busy.jsonl")"
+eq "fleet status: codex finished is idle"                                   "idle" "$(_fstatx "$X")"
+eq "fleet status: codex aborted is idle, not stuck busy"                    "idle" "$(_fstatx "$FIX/codex-aborted.jsonl")"
+
 NS=$(_notify_script)
 eq "notify: the watcher waits on the worker"          "yes" "$(case "$NS" in *'wait "$OVS_TARGET" "$left"'*) echo yes ;; *) echo no ;; esac)"
 eq "notify: the watcher waits inside the given budget" "yes" "$(case "$NS" in *'$(date +%s) + OVS_TIMEOUT'*) echo yes ;; *) echo no ;; esac)"

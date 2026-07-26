@@ -1,0 +1,24 @@
+  returns for a printer that does not exist.
+
+  Vestiges, and one hazard
+
+  What remains is a museum in working order. Baud-rate constants persist as B115200. Modem control lines are still queryable with TIOCMGET. HUPCL still promises to drop DTR on close. Ctrl-S still
+  stops output for a mechanism that has not existed since the Ford administration. Linux carries additional line disciplines for PPP, SLIP, HDLC, Bluetooth HCI, and GSM multiplexing, because a serial
+  byte stream turned out to be a convenient place to hang protocols.
+
+  One vestige turned out to be a real security defect. TIOCSTI lets a process with the terminal open push characters into its input queue as though typed — useful in 1980, and a reliable sandbox
+  escape ever since, since a confined process sharing a tty with a shell can type commands into it. OpenBSD removed it; Linux gated it behind a sysctl in 6.2 (2023). It is a fair illustration of the
+  subsystem's character: an interface designed when the threat model was "a colleague down the hall," still load-bearing in a world of containers.
+
+  Linus Torvalds once called the tty layer a mess, and it is — a fifty-five-year accretion with no coherent author. It is also one of the most durable interfaces in computing, because it got the
+  essential abstraction right on the first try: a bidirectional byte stream, owned by a session, that can interpret a few characters as intentions rather than data.
+
+✻ Baked for 1m 46s
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ now one about the history of terminal escape sequences
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ctx: 4%/1M | ram: 0.4/0.6gb | tss(3): 4.0gb | 277:/sgbl-overseer
+  Opus 5 (1M context) | effort:xhigh | think:on
+  5h: 3% - 4h30m | W: 70% - 3d | main
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents

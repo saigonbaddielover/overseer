@@ -5,6 +5,28 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.35.0] - 2026-07-26
+
+### Fixed
+
+- **`fleet status` called a text-only turn `idle`, so `fleet wait --any` never watched it.** The state
+  column was decided with `_h_is_busy`, which for Claude means "the last assistant message stopped at
+  `tool_use`" — a turn that runs to completion without calling a single tool (any "write me an essay"
+  answer) emits no `tool_use` and therefore read `idle` **while it was still generating**. The
+  consequences were real: `fleet wait --any` excluded such a pane from its in-flight set and could
+  report "nothing in flight" with a worker still writing, and a `fleet send`/`chat` broadcast treated it
+  as a free agent and queued onto live work. `wait` never had the bug (it already used `_h_running`);
+  `fleet status` was the odd one out.
+- Busy is now decided by `_agent_busy`: `_h_is_busy`, **or** `_h_running` (which does catch the
+  text-only turn) confirmed by the screen showing a live spinner. The screen check is needed because
+  Claude's transcript records an **interrupted** turn identically to one still in flight — a human
+  prompt with no terminal assistant message and no interrupt marker — so `_h_running` alone would have
+  pinned an Escaped pane at `busy` **forever**, which is worse than the bug being fixed (it would also
+  make a broadcast permanently skip that pane). The `Stop` hook does not fire on an interrupt either
+  (verified live), so the screen is the only signal that separates the two. See ADR-0006 for why this
+  does not contradict "never trust the spinner": the screen may only **veto** a transcript that already
+  says running — it can never make an idle pane look busy.
+
 ## [0.34.0] - 2026-07-26
 
 ### Added
