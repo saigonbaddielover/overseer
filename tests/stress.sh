@@ -140,6 +140,16 @@ while [ "$(( $(date +%s) - gt0 ))" -lt 25 ]; do grep -q '^send' "$GLOG2" 2>/dev/
 [ "$(grep -c '^wait %fresh' "$GLOG2" 2>/dev/null)" -ge 2 ] && ok "watcher re-waits on a 0-turn worker instead of firing on 'no transcript yet'" || no "watcher did not retry a transcript-less worker ($(tr '\n' '|' <"$GLOG2" 2>/dev/null))"
 grep -q '^send --yes' "$GLOG2" 2>/dev/null && ok "watcher still wakes once the 0-turn worker gets a transcript" || no "watcher never woke after the retry"
 
+echo "== H: screen-state is stable on a still pane and moves when the pane writes =="
+se="ovS_H_$$"; tmux new-session -d -s "$se" -x 80 -y 24 2>/dev/null; SESS+=("$se")
+HP=$(tmux list-panes -t "$se" -F '#{pane_id}' | head -1)
+sleep 1
+h1=$(_screen_state "$HP"); sleep 2; h2=$(_screen_state "$HP")
+{ [ -n "$h1" ] && [ "$h1" = "$h2" ]; } && ok "an idle pane hashes identically across samples ($h1)" || no "idle pane hash drifted: $h1 -> $h2"
+tmux send-keys -t "$HP" 'echo overseer-stress-moved' Enter; sleep 1
+h3=$(_screen_state "$HP")
+[ "$h3" != "$h2" ] && ok "output written into the pane changes the hash" || no "pane output did not change the hash ($h2)"
+
 if [ -n "${OVERSEER_STRESS_CODEX_PANE:-}" ]; then
   CP="$OVERSEER_STRESS_CODEX_PANE"
   echo "== D: codex send-path safety on $CP =="

@@ -128,7 +128,7 @@ _turn_advanced() {   # kind path base bbytes
 # every ~2s so a session the hook does not cover still resolves. codex: no hook, so poll the rollout
 # every tick. args: kind, transcript_path, baseline_turn_count, timeout_s, [claude sid], [since_epoch].
 _wait_reply() {
-  local kind="$1" path="$2" base="$3" timeout="${4:-600}" sid="${5:-}" since="${6:-0}" pane="${7:-}" bbytes="${8:-}" i=0 woke=0 cur
+  local kind="$1" path="$2" base="$3" timeout="${4:-600}" sid="${5:-}" since="${6:-0}" pane="${7:-}" bbytes="${8:-}" i=0 woke=0 cur quiet=0 st lastst=''
   local deadline=$((SECONDS + timeout)) sig last=''
   while [ "$SECONDS" -lt "$deadline" ]; do
     [ "$kind" = claude ] && [ "$woke" = 0 ] && [ -n "$sid" ] && _signal_since "$sid" "$since" && woke=1
@@ -145,13 +145,18 @@ _wait_reply() {
         _turn_advanced "$kind" "$path" "$base" "$bbytes" && return 0
         return 3
       fi
+      st=$(_screen_state "$pane")
+      if [ "$st" != busy ] && [ "$st" = "$lastst" ] && [ "$kind" = claude ] && _h_running "$kind" "$path"; then
+        quiet=$((quiet + 1)); [ "$quiet" -ge 4 ] && return 4
+      else quiet=0; fi
+      lastst="$st"
     fi
     i=$((i + 1)); _nap
   done
   return 1
 }
 _wait_queued_reply() {
-  local kind="$1" path="$2" timeout="${3:-600}" pane="$4" msg="$5" i=0 cur sig last=''
+  local kind="$1" path="$2" timeout="${3:-600}" pane="$4" msg="$5" i=0 cur sig last='' quiet=0 st lastst=''
   local deadline=$((SECONDS + timeout))
   while [ "$SECONDS" -lt "$deadline" ]; do
     if [ -n "$pane" ]; then
@@ -161,6 +166,11 @@ _wait_queued_reply() {
           _h_answered "$kind" "$path" "$msg" && return 0
           return 3
         fi
+        st=$(_screen_state "$pane")
+        if [ "$st" != busy ] && [ "$st" = "$lastst" ] && [ "$kind" = claude ] && _h_running "$kind" "$path"; then
+          quiet=$((quiet + 1)); [ "$quiet" -ge 4 ] && return 4
+        else quiet=0; fi
+        lastst="$st"
       fi
     fi
     sig=$(_file_sig "$path")
@@ -173,7 +183,7 @@ _wait_queued_reply() {
   return 1
 }
 _wait_drained() {
-  local kind="$1" path="$2" timeout="${3:-600}" pane="$4" i=0 cur sig last='' stable=0 running=1 quiet=0
+  local kind="$1" path="$2" timeout="${3:-600}" pane="$4" i=0 cur sig last='' stable=0 running=1 quiet=0 st lastst=''
   local deadline=$((SECONDS + timeout))
   while [ "$SECONDS" -lt "$deadline" ]; do
     if [ -n "$pane" ]; then
@@ -183,9 +193,11 @@ _wait_drained() {
           _h_running "$kind" "$path" || return 0
           return 3
         fi
-        if [ "$running" = 1 ] && ! _queued "$pane" && ! _thinking "$pane"; then
+        st=$(_screen_state "$pane")
+        if [ "$st" != busy ] && [ "$st" = "$lastst" ] && [ "$running" = 1 ] && [ "$kind" = claude ]; then
           quiet=$((quiet + 1)); [ "$quiet" -ge 4 ] && return 0
         else quiet=0; fi
+        lastst="$st"
       fi
     fi
     sig=$(_file_sig "$path")

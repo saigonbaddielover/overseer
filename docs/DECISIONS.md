@@ -259,7 +259,9 @@ could not have.
 
 ## ADR-0006 — The screen may veto a "running" transcript, never assert one
 
-**Status:** Accepted (2026-07-26).
+**Status:** Accepted (2026-07-26); the veto's *evidence* is superseded by ADR-0007 (2026-07-26). The
+rule below — screen downgrades only, never upgrades — still holds; what changed is that "a live
+spinner" turned out to be the wrong thing to look for.
 
 ### Context
 
@@ -310,3 +312,56 @@ record.
   the screen check unnecessary.
 - The spinner's rendering changes enough that `_thinking_text` needs more than a fixture refresh — that
   is the tripwire the fixtures exist for.
+
+## ADR-0007 — Liveness is screen *movement*, not the spinner
+
+**Status:** Accepted (2026-07-26). Supersedes the evidence ADR-0006 used, not its rule.
+
+### Context
+
+ADR-0006 read "is a turn in flight?" off the spinner line. Driving a real Claude pane through long
+turns showed that premise is false twice over.
+
+**The spinner is not drawn for the whole turn.** Once Claude starts rendering the assistant's final
+text, the status row disappears and only the streaming prose is on screen. A 181s turn showed a
+spinner for its first ~87s and none for the remaining ~94s while it was still writing. `wait` and
+`chat` both called that turn interrupted and returned mid-reply.
+
+**The spinner's elapsed field is not one format.** It reads `(47s · thinking)` under a minute and
+`(1m 5s · thinking)` over one, so `_thinking_text`'s `\([0-9]+s` went blind on every turn that crossed
+60 seconds — the exact turns long enough for anyone to run `wait` on.
+
+Both were invisible to the earlier live checks because `tmux send-keys Escape` does **not** interrupt
+Claude Code (verified: five Escapes over a running turn changed nothing), so the "interrupted" pane
+those checks measured was in fact a still-running one past the 60s formatting cliff. `Ctrl-C` does
+interrupt, and that is what the state was finally reproduced with: no terminal assistant record, no
+`turn_duration`, no `Stop` marker — the transcript stays "running" forever, exactly as ADR-0006 said.
+
+### Decision
+
+Keep the veto, change what it looks at. `_screen_state <pane>` returns either `busy` (a spinner or a
+queued-message hint is on screen) or a checksum of the pane **above the input box** — the cursor row
+locates the box, so the always-ticking custom statusline underneath it is excluded.
+
+A turn is called interrupted only when that value is **not `busy` and byte-identical to the previous
+sample**, four consecutive times on the loop's existing every-8th-iteration cadence. Movement is the
+signal: a thinking turn moves its spinner, a streaming turn moves its text, an interrupted turn moves
+nothing. `_agent_busy` (`fleet status`) uses the same evidence with a two-sample check, since it has no
+poll loop to debounce over.
+
+### Consequences
+
+- `chat` gains rc=4 from `_wait_reply`/`_wait_queued_reply`: the turn stopped with no reply to print,
+  which is neither the timeout (rc=1) nor a dead pane (rc=3), so it needs its own exit and message.
+- The veto stays Claude-only. Codex records `turn_aborted` in its rollout, so `_cx_is_busy` already
+  reads an aborted turn as idle and has no reason to consult the screen.
+- The failure mode is now bounded by movement rather than by a string: a spinner-format change costs a
+  slower veto, not a false one, because streamed text keeps the checksum moving. A false "interrupted"
+  needs a pane that is byte-frozen for ~8s while genuinely working.
+- Cost is one `capture-pane` plus one `display-message` every ~2s, replacing the previous capture.
+
+### Revisit this decision if
+
+- A turn can render nothing at all for ~8s while alive (a long silent tool with the status row hidden
+  would do it) — then the debounce, not the evidence, is what needs raising.
+- Claude Code starts recording interrupts, which retires the whole screen path.
