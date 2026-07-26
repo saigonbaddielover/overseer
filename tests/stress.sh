@@ -104,6 +104,42 @@ else
   echo "== F3: skipped (no codex on PATH; the shell start/stop above needs no agent) =="
 fi
 
+echo "== G: --notify arms a detached watcher that outlives the dispatching command =="
+_die() { printf 'overseer: %s\n' "$1" >&2; exit 1; }
+. "$LIB/windows.sh"; . "$LIB/commands.sh"
+GLOG="$TMP/notify-calls.log"
+cat >"$TMP/fake-overseer" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$1 \$2 \$3" >>"$GLOG"
+[ "\$1" = wait ] && { sleep 2; printf 'idle\n'; }
+exit 0
+EOF
+chmod +x "$TMP/fake-overseer"
+( export OVERSEER_SELF="$TMP/fake-overseer"; _notify_spawn %worker claude %admin 42 1 ) >/dev/null 2>&1
+gt0=$(date +%s)
+while [ "$(( $(date +%s) - gt0 ))" -lt 20 ]; do grep -q '^send' "$GLOG" 2>/dev/null && break; sleep 0.3; done
+gel=$(( $(date +%s) - gt0 ))
+grep -q '^wait %worker 42$' "$GLOG" 2>/dev/null && ok "watcher waits on the worker with the given timeout" || no "watcher did not wait on the worker ($(cat "$GLOG" 2>/dev/null | tr '\n' '|'))"
+grep -q '^send --yes %admin$' "$GLOG" 2>/dev/null && ok "watcher woke the dispatcher's pane after the wait (${gel}s, outlived its parent)" || no "watcher never woke the dispatcher ($(cat "$GLOG" 2>/dev/null | tr '\n' '|'))"
+[ "$(head -1 "$GLOG" 2>/dev/null | cut -d' ' -f1)" = wait ] && ok "watcher waits before it wakes (ordering)" || no "watcher wake/wait ordering wrong"
+
+GLOG2="$TMP/notify-calls2.log"; GSTATE="$TMP/notify-firstwait"
+cat >"$TMP/fake-overseer2" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$1 \$2" >>"$GLOG2"
+if [ "\$1" = wait ]; then
+  [ -f "$GSTATE" ] || { : >"$GSTATE"; printf "overseer: no transcript yet for '\$2' (a brand-new session with 0 turns has none)\n"; exit 1; }
+  printf 'awaiting input: proceed?\n'
+fi
+exit 0
+EOF
+chmod +x "$TMP/fake-overseer2"
+( export OVERSEER_SELF="$TMP/fake-overseer2"; _notify_spawn %fresh claude %admin 60 0 ) >/dev/null 2>&1
+gt0=$(date +%s)
+while [ "$(( $(date +%s) - gt0 ))" -lt 25 ]; do grep -q '^send' "$GLOG2" 2>/dev/null && break; sleep 0.3; done
+[ "$(grep -c '^wait %fresh' "$GLOG2" 2>/dev/null)" -ge 2 ] && ok "watcher re-waits on a 0-turn worker instead of firing on 'no transcript yet'" || no "watcher did not retry a transcript-less worker ($(tr '\n' '|' <"$GLOG2" 2>/dev/null))"
+grep -q '^send --yes' "$GLOG2" 2>/dev/null && ok "watcher still wakes once the 0-turn worker gets a transcript" || no "watcher never woke after the retry"
+
 if [ -n "${OVERSEER_STRESS_CODEX_PANE:-}" ]; then
   CP="$OVERSEER_STRESS_CODEX_PANE"
   echo "== D: codex send-path safety on $CP =="

@@ -211,6 +211,34 @@ rm -f "$WAF"
 eq "fleet: no-agent-panes uses a distinct sentinel (3, not the wait-timeout code)" "3" \
    "$( ( _panes() { :; }; _need() { :; }; _fleet_local status ) >/dev/null 2>&1; echo $? )"
 
+NS=$(_notify_script)
+eq "notify: the watcher waits on the worker"          "yes" "$(case "$NS" in *'wait "$OVS_TARGET" "$left"'*) echo yes ;; *) echo no ;; esac)"
+eq "notify: the watcher waits inside the given budget" "yes" "$(case "$NS" in *'$(date +%s) + OVS_TIMEOUT'*) echo yes ;; *) echo no ;; esac)"
+eq "notify: a confirmed turn skips the startup grace"  "yes" "$(case "$NS" in *'"$OVS_STARTED" = 1'*) echo yes ;; *) echo no ;; esac)"
+eq "notify: an unconfirmed turn does not trust a stale idle" "yes" "$(case "$NS" in *'-ge "$grace"'*) echo yes ;; *) echo no ;; esac)"
+eq "notify: the watcher wakes the dispatcher's pane"  "yes" "$(case "$NS" in *'send --yes "$OVS_BACK"'*) echo yes ;; *) echo no ;; esac)"
+eq "notify: the wake-up quotes what wait reported"    "yes" "$(case "$NS" in *'overseer wait $OVS_TARGET reported'*) echo yes ;; *) echo no ;; esac)"
+eq "notify: the wake-up orders a whole-fleet survey"  "yes" "$(case "$NS" in *'overseer fleet status'*) echo yes ;; *) echo no ;; esac)"
+eq "notify: the quoted output is capped"              "yes" "$(case "$NS" in *'head -c 1200'*) echo yes ;; *) echo no ;; esac)"
+eq "notify: the watcher re-waits while the worker has no transcript" "yes" "$(case "$NS" in *"no transcript yet"*) echo yes ;; *) echo no ;; esac)"
+
+_ntfy() { ( export DEFAULT_TIMEOUT=600
+            _need() { :; }
+            _uint() { :; }
+            _target_ctx() { printf '%%9\tclaude\t/x.jsonl'; }
+            if [ -n "$1" ]; then TMUX_PANE="$1"; export TMUX_PANE; else unset TMUX_PANE; fi
+            cmd_send --notify "$2" hi ) 2>&1; }
+eq "notify: refuses when overseer is not in a tmux pane" "yes" \
+   "$(case "$(_ntfy '' %9)" in *'nowhere to report back'*) echo yes ;; *) echo no ;; esac)"
+eq "notify: refuses to wake the pane it dispatches to"   "yes" \
+   "$(case "$(_ntfy %9 %9)" in *'would wake the pane it is dispatching to'*) echo yes ;; *) echo no ;; esac)"
+eq "notify: send takes a timeout only with --notify"     "yes" \
+   "$(case "$( ( _need() { :; }; cmd_send %9 hi 30 ) 2>&1 )" in *'only with --notify'*) echo yes ;; *) echo no ;; esac)"
+eq "notify: fleet chat rejects --notify"                 "yes" \
+   "$(case "$( ( _need() { :; }; _panes() { printf 'a\t%%1\t1\tclaude\t/x\n'; }; _fleet_local chat --notify hi ) 2>&1 )" in *'belongs to fleet send'*) echo yes ;; *) echo no ;; esac)"
+eq "notify: a cross-host fleet send rejects --notify"    "yes" \
+   "$(case "$( ( _need() { :; }; cmd_fleet --hosts send --notify hi ) 2>&1 )" in *'exists only on this machine'*) echo yes ;; *) echo no ;; esac)"
+
 eq "provision: --dry-run threads DRY=1" "yes" "$(_provision_script 1 | grep -qx 'DRY=1' && echo yes || echo no)"
 eq "provision: defaults to DRY=0"       "yes" "$(_provision_script | grep -qx 'DRY=0' && echo yes || echo no)"
 eq "provision: targets tmux and jq"     "yes" "$(_provision_script 0 | grep -q 'for c in tmux jq' && echo yes || echo no)"

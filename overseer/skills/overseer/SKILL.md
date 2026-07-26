@@ -38,9 +38,9 @@ from stdin.
 | `read <target>` | Print the last user prompt + last assistant reply from an agent's transcript (Claude `~/.claude/projects/.../<sid>.jsonl`, or Codex `~/.codex/sessions/.../rollout-*.jsonl`), auto-detected via the pane pid. | read-only |
 | `peek [raw\|-e] <target> [lines]` | Dump the pane's current screen. Plain mode drops blank lines and a trailing number caps it to the last N lines. `raw` (also `-e`/`--raw`) keeps ANSI colors so the **active tab / selected row** — a highlight invisible in plain text — is readable; `raw` always prints the whole screen and ignores `[lines]`. Any pane. | read-only |
 | `chat [--yes] <target> <message\|-> [timeout]` | **Agent pane (Claude or Codex).** Send the message, **wait for the turn to finish**, then print the reply. The human round-trip. If the agent is **busy (mid-turn) or compacting**, the message is **queued** and `chat` waits for *its own* queued turn to complete — not the running one. The reply it prints is bound to *your* message (the first completed turn after your prompt, on both Claude and Codex), so it is never the running turn's reply, nor a later background/notification turn's if the agent is itself orchestrating child agents. If the agent stops at an interactive prompt (permission / plan / select menu) it returns that question + how to answer instead of hanging. | **SIDE EFFECT** |
-| `send [--yes] <target> <message\|->` | **Agent pane (Claude or Codex).** Place + submit the message, then confirm the turn actually started before returning (so a following `wait`/`read` doesn't race) — but do **not** wait for the reply (use `chat` for that). If the agent is **busy (mid-turn) or compacting its context**, Claude **queues** the message: `send` reports `QUEUED` and exits 0 — it *was* received and runs when the agent frees up, so tell the user it is queued (not lost) and `wait` for the reply. Do **not** resend. Only **one** message queues at a time: a second `send`/`chat` while one is already queued is refused with a clear message (`wait` for the queued one to run first). | **SIDE EFFECT** |
+| `send [--yes] [--notify] <target> <message\|-> [notify_timeout]` | **Agent pane (Claude or Codex).** Place + submit the message, then confirm the turn actually started before returning (so a following `wait`/`read` doesn't race) — but do **not** wait for the reply (use `chat` for that). **`--notify`** also arms a **detached watcher** on that worker which pastes a wake-up into *your own* pane when the worker's turn ends / it stops at a prompt / it dies — so you can end your turn instead of polling; see "Dispatching without losing track" below. If the agent is **busy (mid-turn) or compacting its context**, Claude **queues** the message: `send` reports `QUEUED` and exits 0 — it *was* received and runs when the agent frees up, so tell the user it is queued (not lost) and `wait` for the reply. Do **not** resend. Only **one** message queues at a time: a second `send`/`chat` while one is already queued is refused with a clear message (`wait` for the queued one to run first). | **SIDE EFFECT** |
 | `wait <target> [timeout]` | **Agent pane (Claude or Codex).** Block until the target **drains to idle** — its current turn finishes *and* any queued message behind it has run — or return early with the question if the agent stops at an interactive prompt awaiting your input. Correctly waits through a **compaction** with a queued message (a compacting agent reads *idle* in the transcript, so a naive check would return early) and through a text-only turn (no `tool_use`) — give it a generous timeout, since a compaction can take minutes. | read-only |
-| `fleet [--hosts\|--tailscale [--os NAME]] [-u USER] [status\|read\|wait\|send\|chat] [args]` | **Every agent pane at once** (a fan-out over the per-pane commands; each pane is handled in isolation so one failure never aborts the batch). With no subcommand it defaults to `status`, which prints one line per pane — harness + `idle`/`busy`/`awaiting`/`compacting`, plus `idle(0-turn)` for an agent that hasn't taken a turn yet and `(not an agent)` for a pane that stopped being one (`compacting` = a claude summarizing its context; its transcript reads idle, but a message sent now only **queues**). `read` and `wait [timeout]` fan those out — and `wait --any [timeout]` returns as soon as the **first** in-flight pane finishes/awaits/exits (for a poll loop: dispatch to N agents, then `fleet wait --any` to react to whichever pings first, instead of blocking on every pane); `send`/`chat [--yes] <msg>` **broadcast** the same message to all agent panes, but **only idle ones receive it** — a busy/awaiting/compacting pane is skipped, never queued onto, so a broadcast never lands on unrelated running work. **`--hosts`** (or `--tailscale [--os NAME]`, `-u USER`) also fans out **across the fleet**: every inventory host (resolved like `hosts`, auto-deployed on first touch) runs `on <host> fleet <sub>` in parallel — local panes under `===== local =====`, each host under `===== host =====`. A fleet-wide `send`/`chat` is gated: a read-only status sweep runs first, **previews which idle agents would receive it** plus the panes it will skip, and asks for **one confirmation**; `--dry-run` stops after the preview, `--yes` skips it (scripts only). Use `status` to survey many sessions. **Broadcasting is a blind write into unrelated projects** — every idle agent runs the message in *its own* repo/cwd — so never broadcast an imperative ("commit and push", "run the tests") unless the user explicitly asked to message every agent; prefer `--dry-run` first, and prefer `status`/`read` when they only want to survey. | status/read/wait read-only · send/chat **SIDE EFFECT** |
+| `fleet [--hosts\|--tailscale [--os NAME]] [-u USER] [status\|read\|wait\|send\|chat] [args]` | **Every agent pane at once** (a fan-out over the per-pane commands; each pane is handled in isolation so one failure never aborts the batch). With no subcommand it defaults to `status`, which prints one line per pane — harness + `idle`/`busy`/`awaiting`/`compacting`, plus `idle(0-turn)` for an agent that hasn't taken a turn yet and `(not an agent)` for a pane that stopped being one (`compacting` = a claude summarizing its context; its transcript reads idle, but a message sent now only **queues**). `read` and `wait [timeout]` fan those out — and `wait --any [timeout]` returns as soon as the **first** in-flight pane finishes/awaits/exits (for a poll loop: dispatch to N agents, then `fleet wait --any` to react to whichever pings first, instead of blocking on every pane); `send`/`chat [--yes] <msg>` **broadcast** the same message to all agent panes (`send --notify <msg> [notify_timeout]` also arms one wake-up watcher per receiving pane), but **only idle ones receive it** — a busy/awaiting/compacting pane is skipped, never queued onto, so a broadcast never lands on unrelated running work. **`--hosts`** (or `--tailscale [--os NAME]`, `-u USER`) also fans out **across the fleet**: every inventory host (resolved like `hosts`, auto-deployed on first touch) runs `on <host> fleet <sub>` in parallel — local panes under `===== local =====`, each host under `===== host =====`. A fleet-wide `send`/`chat` is gated: a read-only status sweep runs first, **previews which idle agents would receive it** plus the panes it will skip, and asks for **one confirmation**; `--dry-run` stops after the preview, `--yes` skips it (scripts only). Use `status` to survey many sessions. **Broadcasting is a blind write into unrelated projects** — every idle agent runs the message in *its own* repo/cwd — so never broadcast an imperative ("commit and push", "run the tests") unless the user explicitly asked to message every agent; prefer `--dry-run` first, and prefer `status`/`read` when they only want to survey. | status/read/wait read-only · send/chat **SIDE EFFECT** |
 | `quit <target>` | **Agent (Claude/Codex).** Exit the TUI to reveal the shell underneath, **keeping tmux and the pane alive** (Claude: two Ctrl-C; Codex: one), then confirms the pane returned to a shell. | **SIDE EFFECT** |
 | `start <name> [shell\|claude\|codex] [workdir]` | **Create (Linux tmux).** Open a new **detached** tmux session `<name>` running a shell (default), Claude Code or Codex; for an agent it blocks until the harness has actually come up before returning. The user watches it with `tmux attach -t <name>`; you drive it with `chat`/`send`/`sh`/… Runs identically locally and via `on <host> start …`. Refuses a name outside `[A-Za-z0-9_-]`, one already in use, or a `workdir` that does not exist. | **SIDE EFFECT** (spawns a session) |
 | `stop <target>` | **Delete (Linux tmux).** Tear down a `start`ed session (or any tmux target): a `%N` pane → `kill-pane` (that pane); a session name → `kill-session` (the whole session + its child, via SIGHUP). Refuses to kill the session — or, for a `%N` target, the pane — overseer is running in. The Linux peer of `win <host> stop`; use `quit` instead when you only want to leave an agent's TUI but keep the pane. | **SIDE EFFECT** (destroys a session) |
@@ -110,6 +110,10 @@ command of the same name.
 - "Ask it X and tell me what it says" → `chat` (sends, waits, returns the answer).
 - "Reply to it / send it X on my behalf" → `chat` (or `send` if you do not need the reply),
   under the rules below.
+- "Give this worker a long job and tell me when it's done" → `send --notify <target> <msg> [timeout]`,
+  then **end your turn**. Do not `chat` a long job (you would hold your turn open until the timeout,
+  then report a timeout instead of the answer), and do not plain-`send` it (nothing would ever bring
+  you back). See "Dispatching without losing track".
 - "Run this in the terminal I'm watching" (a plain shell pane) → `sh` (runs it, waits, returns
   output + exit code — so the user sees it happen live and you get the result).
 - "Quit that agent but keep the terminal" → `quit` (works for Claude and Codex; it sends the right
@@ -238,6 +242,34 @@ prompt-agnostic — it does not depend on knowing the shell's `PS1`. If the outp
 the opening sentinel scrolled out of the pane's history, `sh` prints the exit code and says the output
 cannot be captured whole; re-run with `> out.txt 2>&1` and read the file instead.
 
+## Dispatching without losing track (`send --notify`)
+
+You cannot be reached once your turn ends. `chat`, `wait` and `fleet wait --any` all require **you** to
+stay in the turn and block; if you plain-`send` a long job and finish your turn, nothing will ever bring
+you back to collect it, and the user will believe you are still watching.
+
+So for work that outlasts one round-trip:
+
+```
+overseer send --notify <target> '<the task>' [seconds]
+```
+
+This sends normally and arms a **detached watcher**: it `wait`s on that worker and then pastes a
+wake-up into **your own pane**, which starts a fresh turn for you. You are free to end your turn
+immediately — say you dispatched it and that you will be woken. Rules:
+
+- It reports back to `$TMUX_PANE`, so it only works when you are yourself in a tmux pane, and it
+  **refuses** to target the pane it would wake (dispatch to a *different* agent).
+- `[seconds]` bounds the watcher (default `OVERSEER_TIMEOUT`). Pass a generous number for a long job —
+  on expiry it wakes you saying so, rather than vanishing.
+- You are woken the same way for **any** end state: turn finished, worker **stopped at a
+  permission/menu prompt**, or worker died. The wake-up quotes what `wait` reported.
+- **When woken, survey before acting.** An agent holds one queued message, so a second worker that
+  finished while you were busy had its notice refused — the wake-up says this. Run `fleet status`, then
+  `read` every idle/awaiting pane, and handle all of them, not just the pane named in the notice.
+- `fleet send --notify <msg>` arms one per receiving pane. Local only — `--hosts`/`--tailscale` refuse
+  it, since the pane to wake is on this machine.
+
 ## Navigating a Claude feature screen (`/status`, `/resume`, `/model`, ...)
 
 Many slash commands open a **tabbed and/or scrollable** panel, not a single static view. Read the
@@ -310,6 +342,12 @@ WHOLE thing, do not stop at the first screen. The reliable loop:
    session. `stop` is destructive (the child dies); it refuses to kill the session (or, for a `%N`
    target, the pane) overseer itself runs in, but will kill any other named session. Prefer `quit` when
    the user only wants to leave an agent's TUI while keeping the pane.
+
+9. **`--notify` types into the pane you are running in.** The wake-up is delivered like any other
+   message — the input box is cleared first — so anything half-typed and unsent in that pane at that
+   moment is lost. That pane is the dispatching agent's own, which the user does not type into while an
+   agent drives it; do not point `--notify` at a pane a human is composing in. Each wake-up also starts
+   a real turn in that session, so arm one per dispatched job, not per status check.
 
 ## Gotchas the script already handles (do not re-derive)
 

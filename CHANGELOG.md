@@ -5,6 +5,40 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.34.0] - 2026-07-26
+
+### Added
+
+- **`send --notify` wakes the dispatching agent when the worker finishes — no polling.** Until now
+  every way of learning that a worker was done required the dispatcher to *choose* to block: `chat`
+  waits on the reply, `wait`/`fleet wait --any` wait on the pane. That is a structural dead end for a
+  long job, not a discipline problem: a Claude Code session has no inbound channel, so once the
+  dispatcher's turn ends nothing can reach it until a human types, and a plain `send` is simply never
+  collected. `send [--yes] --notify <target> <msg> [notify_timeout]` does the normal send and then arms
+  a **detached watcher** (`setsid`) that runs `wait` on the worker and then `send`s a wake-up back into
+  `$TMUX_PANE` — the dispatcher's own pane — starting a fresh turn there. The dispatcher returns
+  immediately and may go idle. Built entirely out of the existing `wait` + `send`: no daemon, no new
+  state on disk, no new event protocol, and it works for **Codex** workers too (which have no hooks),
+  while still riding the `Stop`-hook accelerator wherever `wait` already does.
+  - The wake-up is a **doorbell, not a mailbox**: an agent holds only one queued message, so a second
+    worker finishing while the dispatcher is mid-turn has its notice refused. The text therefore quotes
+    what `wait` reported and then instructs the woken agent to survey the whole fleet (`fleet status`,
+    then `read` each idle/awaiting pane) instead of acting on the pane that rang — a dropped duplicate
+    costs nothing because the survey finds it.
+  - Inherits `wait`'s answers, so a worker **blocked on a permission/menu prompt** wakes the dispatcher
+    exactly like a finished turn does, as does one that died mid-turn. Bounded by `[notify_timeout]`
+    (default `OVERSEER_TIMEOUT`); on expiry it wakes with that fact rather than disappearing.
+  - Guards: refuses when overseer is not inside a tmux pane (`$TMUX_PANE` unset — there is no pane to
+    wake), refuses to wake the very pane it is dispatching to, and refuses `[timeout]` without
+    `--notify`. `fleet send --notify <msg> [notify_timeout]` arms one watcher per receiving pane;
+    `fleet chat` rejects the flag (it already waits) and the cross-host `--hosts`/`--tailscale` path
+    rejects it (the pane to wake exists only on the local machine).
+  - The watcher does not trust a **stale idle**: a freshly `start`ed worker has no transcript for the
+    first seconds and one whose turn overseer could not confirm within its 10s budget reads briefly as
+    idle, so a naive watcher fired at once. It re-waits while the worker reports "no transcript yet",
+    and when the turn start was **not** confirmed it also re-waits through a 30s startup grace before
+    believing an `idle`; when `send` did confirm the start, it waits with no grace at all.
+
 ## [0.33.0] - 2026-07-24
 
 ### Added
