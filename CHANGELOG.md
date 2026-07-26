@@ -5,6 +5,21 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.36.0] - 2026-07-26
+
+### Fixed
+
+- **`wait` no longer blocks to its timeout on a pane whose turn was interrupted.** `_wait_drained` asked
+  only `_h_running`, and Claude records an Escaped turn identically to one in flight (a human prompt, no
+  terminal assistant message, no interrupt marker), so `overseer wait` on an interrupted agent sat there
+  until `[timeout]` — and so did the `send --notify` watcher built on it, and `fleet wait`. The loop now
+  applies the same screen veto v0.35.0 gave `fleet status`, **debounced**: it samples the pane on the
+  existing every-8th-iteration cadence and requires **four consecutive** spinner-free samples (~8s, and
+  neither queued nor awaiting) before calling the turn drained. Sustained silence while the transcript
+  claims running means the turn was interrupted; a momentary render gap cannot cut a live turn short.
+  Verified live: a real text-only turn still ran its full 33s with no early return, while an
+  interrupted one returned `idle` in 10s instead of 180s.
+
 ## [0.35.0] - 2026-07-26
 
 ### Fixed

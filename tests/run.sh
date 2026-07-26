@@ -211,6 +211,20 @@ rm -f "$WAF"
 eq "fleet: no-agent-panes uses a distinct sentinel (3, not the wait-timeout code)" "3" \
    "$( ( _panes() { :; }; _need() { :; }; _fleet_local status ) >/dev/null 2>&1; echo $? )"
 
+_drain() { ( export THINK="$1" RUN="$2"
+             _awaiting() { return 1; }
+             _queued() { return 1; }
+             _is_shell() { return 1; }
+             _thinking() { return "$THINK"; }
+             _h_running() { return "$RUN"; }
+             _file_sig() { printf 'sig%s' "$SECONDS-$RANDOM"; }
+             _nap() { sleep 0.005; }
+             tmux() { printf 'node'; }
+             _wait_drained claude /nope 2 %9 ); printf '%s' "$?"; }
+eq "wait: a running transcript with no spinner drains (interrupted, not stuck)" "0" "$(_drain 1 0)"
+eq "wait: a running transcript WITH a spinner keeps waiting to timeout"         "1" "$(_drain 0 0)"
+eq "wait: a finished transcript drains regardless of the screen"                "0" "$(_drain 0 1)"
+
 eq "thinking: a live spinner line is in-flight"        "0" "$(_thinking_text "$(cat "$FIX/thinking-claude.txt")" >/dev/null 2>&1; echo $?)"
 eq "thinking: a completed turn shows none"             "1" "$(_thinking_text "$(cat "$FIX/thinking-none-done.txt")" >/dev/null 2>&1; echo $?)"
 eq "thinking: an interrupted turn shows none"          "1" "$(_thinking_text "$(cat "$FIX/thinking-none-interrupted.txt")" >/dev/null 2>&1; echo $?)"
