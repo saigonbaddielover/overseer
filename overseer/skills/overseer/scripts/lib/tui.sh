@@ -75,6 +75,14 @@ _compacting() {
   cap=$(tmux capture-pane -p -t "$pane" 2>/dev/null) || return 1
   _compacting_text "$cap"
 }
+_thinking_text() {
+  printf '%s\n' "$1" | grep -qE '…[[:space:]]*\([0-9]+s|^[[:space:]]*[^[:space:]].{0,58}…[[:space:]]*$'
+}
+_thinking() {
+  local pane="$1" cap
+  cap=$(tmux capture-pane -p -t "$pane" 2>/dev/null) || return 1
+  _thinking_text "$cap"
+}
 _queued_text() {
   printf '%s\n' "$1" | grep -qF 'Press up to edit queued messages'
 }

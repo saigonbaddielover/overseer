@@ -256,3 +256,56 @@ could not have.
   be worth its state).
 - Claude Code grows a real inbound channel (an API, a "resume with this message" primitive), which would
   make the keystroke round-trip unnecessary.
+
+## ADR-0006 — The screen may veto a "running" transcript, never assert one
+
+**Status:** Accepted (2026-07-26).
+
+### Context
+
+`fleet status` decided busy/idle from `_h_is_busy`, which for Claude means "the last assistant message
+stopped at `tool_use`". A turn that answers without calling a tool emits no `tool_use`, so a worker
+writing a long text-only reply read `idle` while still generating — which made `fleet wait --any`
+exclude it from the in-flight set and let a broadcast queue onto live work.
+
+The obvious fix is `_h_running` (the predicate `wait` already uses: a human prompt with no terminal
+assistant message after it). Live testing showed why it is not enough on its own: when a turn is
+**interrupted** with Escape, Claude writes *nothing* — no terminal assistant message, no interrupt
+record — so the transcript of an interrupted turn is byte-for-byte the same shape as one still in
+flight. `_h_running` alone therefore pins an Escaped pane at `busy` permanently, which is worse than the
+original bug: it is sticky, and a broadcast would skip that pane forever. The bundled `Stop` hook does
+not fire on an interrupt either (verified: the marker mtime never advanced), so no transcript- or
+hook-based signal separates the two states.
+
+### Decision
+
+Busy = `_h_is_busy` **or** (`_h_running` **and** the screen shows a live spinner), via `_agent_busy`.
+The screen is used strictly as a **veto**: it can only downgrade a transcript that already claims
+running, never upgrade an idle transcript to busy.
+
+That is what keeps this consistent with the project's standing rule that a finished turn leaves a stale
+`Brewed for Ns` line, so the spinner must never be trusted to judge **completion**. Nothing here judges
+completion — the transcript still does. The screen only breaks a tie the transcript cannot express, the
+same way `_awaiting` and `_compacting` (already screen-based) answer questions the transcript does not
+record.
+
+### Consequences
+
+- `_thinking_text` is a pure function over captured text, fixture-tested against real captures of all
+  three states (in-flight, completed, interrupted) plus the stale `Brewed for` line and a wrapped prose
+  line ending in an ellipsis.
+- The failure modes are **bounded by the two options it sits between**: a missed spinner degrades to the
+  old `_h_is_busy` behaviour for that pane, and a spurious match degrades to plain `_h_running`. Neither
+  is worse than shipping either predicate alone.
+- One extra `capture-pane` per pane, and only when the transcript says running but no tool is in flight.
+- `cmd_wait` still uses bare `_h_running`, so `wait` on a pane whose turn was interrupted blocks until
+  its timeout instead of returning idle. Left alone deliberately: `wait`'s contract is "block until this
+  turn ends", the timeout bounds it, and a mid-wait interrupt would need the same veto inside
+  `_wait_drained` — a larger change than the status fix this ADR covers.
+
+### Revisit this decision if
+
+- Claude Code starts recording an interrupt in the transcript (or fires `Stop` on one), which would make
+  the screen check unnecessary.
+- The spinner's rendering changes enough that `_thinking_text` needs more than a fixture refresh — that
+  is the tripwire the fixtures exist for.
