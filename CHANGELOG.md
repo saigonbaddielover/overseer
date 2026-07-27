@@ -5,6 +5,46 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.37.1] - 2026-07-27
+
+### Fixed
+
+- **The Windows path never got the busy-detection fixes Linux has had since 0.35.0.** `win wait` and the
+  mid-turn guard on `win chat`/`win send` both asked `_h_is_busy`, so a remote turn that answers without
+  calling a tool read **idle**: `win wait` returned immediately on a working agent, and a delivery could
+  paste straight into a live turn. Both now use `_win_agent_busy` (`_h_is_busy`, else `_h_running`
+  confirmed by the broker's `SNAP` grid still moving), and `_win_wait_turn` carries the same debounced
+  veto, returning **rc=4** so `win wait` reports `idle` and `win chat` says the turn stopped without a
+  reply instead of blocking to `[timeout]`. The Windows snapshot has no cursor position, so the whole
+  grid is hashed rather than just the region above the input box — a host whose console has a ticking
+  element simply never vetoes, which degrades to the old blocking behaviour rather than to a false idle.
+- **A single-line prompt longer than the remote console was never deliverable.** `win chat`/`win send`
+  verified the paste by comparing the whole message against the one composer line carrying the `>`
+  marker, but the console soft-wraps the overflow onto gutter-indented continuation lines — so anything
+  past roughly one screen width could not match, and every attempt ended in `could not place/verify the
+  prompt` with the box cleared. The composer is now read whole (`_win_box_text` joins the marker line
+  with its continuations, stopping at the closing rule) and compared with whitespace removed, since a
+  wrap swallows the space it breaks on. A short prompt still takes the exact-match path, and a prompt
+  that only partly landed still fails closed.
+- **`fleet status` could call a streaming turn idle on a single slow frame.** `_agent_busy` compared two
+  samples ~0.75s apart; now it samples up to six times, returning `busy` the moment the screen moves, so
+  a frozen verdict needs ~3s of stillness. A streaming pane still costs one extra sample, an interrupted
+  one costs the full window.
+- **A turn with an extended-thinking block counted as two.** Claude writes the final assistant message as
+  two transcript records — one for the `thinking` block, one for the `text` — sharing a `message.id` and
+  both carrying `stop_reason: end_turn`, so `_turn_count`/`_turns_after` counted 2 per turn (visible in
+  `doctor`'s "parsed N completed turns"). They now count **distinct `message.id`**, falling back to a
+  per-record token when a record has none. A new `claude-thinking-split.jsonl` fixture pins the shape, so
+  a future Claude that flushes the thinking record early — which would make `chat` return before the
+  reply exists — fails the tests instead of shipping silently.
+- A load-sensitive flake in `tests/run.sh` and `tests/win-flow.sh`: the waiter tests ran against a short
+  deadline, which a busy machine could miss before the veto's sample count was reached. The cases that
+  expect an early return now get a generous timeout; only the cases that *want* the deadline to expire
+  keep a short one.
+- The mid-turn refusal on `win chat`/`win send` suggested `keys Escape` to interrupt. Escape does not
+  interrupt Claude Code — verified on a live Windows console, as on Linux — so the hint now names `C-c`
+  for a Claude broker and keeps `Escape` for Codex.
+
 ## [0.37.0] - 2026-07-26
 
 ### Fixed
@@ -713,7 +753,7 @@ every fix is pinned by a test that was proven to fail against the old code.
 ### Added
 - **`OVERSEER_WIN_CLAUDE` / `OVERSEER_WIN_CODEX`** (defaults `claude` / `codex`) name the command
   `winbroker` launches on a Windows host. The agent's command name is host-specific — a machine whose
-  users go through a wrapper (`claudeep`) previously got a broker running the wrong binary, which
+  users go through a renamed wrapper previously got a broker running the wrong binary, which
   starts, paints, and answers every prompt with `Not logged in`. The value must be a bare command name,
   travels base64-encoded, and is decoded into a parameter rather than interpolated, like `workdir`. The
   broker's `kind` stays `claude`/`codex`, so transcript reading and turn detection are untouched.

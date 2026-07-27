@@ -35,6 +35,13 @@ eq "claude last_reply"     $'final reply\nsecond line' "$(_last_reply "$C")"
 eq "claude last_prompt"    "second prompt"             "$(_last_prompt "$C")"
 eq "claude sid"            "test-sid-123"              "$(_sid_from_jsonl "$C")"
 
+TS="$FIX/claude-thinking-split.jsonl"
+eq "claude split thinking+text is ONE turn, not two" "1"    "$(_turn_count "$TS")"
+eq "claude split turns_after(0) is one turn"         "1"    "$(_turns_after claude "$TS" 0)"
+eq "claude split reply is the text block"  "the essay itself" "$(_last_reply "$TS")"
+eq "claude split reply_for_prompt matches" "the essay itself" "$(_reply_for_prompt "$TS" "write me an essay")"
+eq "claude split reads as finished"        ""                 "$(_running_claude "$TS" && echo running)"
+
 CB="$FIX/claude-busy.jsonl"
 eq "claude busy"           "busy"                      "$(_is_busy "$CB" && echo busy)"
 eq "claude busy turns"     "0"                         "$(_turn_count "$CB")"
@@ -108,6 +115,15 @@ eq "a real menu under a numbered reply is found" "awaiting" \
    "$(_aw "$(printf '1. alpha\n2. beta\nProceed?\n❯ 1. Yes\n  2. No\n')")"
 eq "a menu not starting at 1 still counts"    "awaiting" "$(_aw "$(printf 'Proceed?\n❯ 4. Yes\n  5. No\n')")"
 eq "a lone marked option is not a menu"       "no"       "$(_aw "$(printf 'Proceed?\n❯ 1. Yes\n')")"
+
+WRAPBOX=$(cat "$FIX/win-snap-wrapped-box.txt")
+LONGP='Write a 1200-word essay on the history of the semicolon in English prose. Answer entirely from your own knowledge in one message: do NOT use any tool, do NOT read or write any file, do NOT run any command.'
+eq "win box: wrapped lines rejoin to the whole prompt" "$(_win_squash "$LONGP")" "$(_win_squash "$(_win_box_text "$WRAPBOX")")"
+eq "win box: reads the composer, not the transcript echo" "" \
+   "$(case "$(_win_box_text "$WRAPBOX")" in *OVERSEER-OK*) echo leaked ;; esac)"
+eq "win box: a single-line box is unchanged"  "hello"    "$(_win_box_text '> hello')"
+eq "win box: no composer yields nothing"      ""         "$(_win_box_text 'just some output')"
+eq "win squash: a nbsp gutter matches a space" "ab"      "$(_win_squash "a$(printf '\302\240')b")"
 
 _ia() { _is_active_text "$1" "$2" && echo active || echo no; }
 eq "menu: numbered highlighted item is active"      "active" \
@@ -225,25 +241,25 @@ _stubs() { _awaiting() { return 1; }
              changing) printf 'c%s' "$((RANDOM))" ;;
            esac; }; }
 _drain() { ( export SCREEN="$1" RUN="$2"; _stubs
-             _wait_drained "${3:-claude}" /nope 2 %9 ); printf '%s' "$?"; }
+             _wait_drained "${3:-claude}" /nope "${4:-20}" %9 ); printf '%s' "$?"; }
 eq "wait: a running transcript on a frozen screen drains (interrupted, not stuck)" "0" "$(_drain still 0)"
-eq "wait: a running transcript with a live spinner keeps waiting to timeout"       "1" "$(_drain busy 0)"
-eq "wait: a running transcript streaming its reply keeps waiting to timeout"       "1" "$(_drain changing 0)"
+eq "wait: a running transcript with a live spinner keeps waiting to timeout"       "1" "$(_drain busy 0 claude 2)"
+eq "wait: a running transcript streaming its reply keeps waiting to timeout"       "1" "$(_drain changing 0 claude 2)"
 eq "wait: a finished transcript drains regardless of the screen"                   "0" "$(_drain busy 1)"
-eq "wait: codex is exempt from the screen veto and waits out its turn"             "1" "$(_drain still 0 codex)"
+eq "wait: codex is exempt from the screen veto and waits out its turn"             "1" "$(_drain still 0 codex 2)"
 
 _wreply() { ( export SCREEN="$1" RUN="$2"; _stubs
               case "${4:-reply}" in
-                reply)  _wait_reply "${3:-claude}" /nope 0 2 "" 0 %9 "" ;;
-                queued) _wait_queued_reply "${3:-claude}" /nope 2 %9 'msg' ;;
+                reply)  _wait_reply "${3:-claude}" /nope 0 "${5:-20}" "" 0 %9 "" ;;
+                queued) _wait_queued_reply "${3:-claude}" /nope "${5:-20}" %9 'msg' ;;
               esac ); printf '%s' "$?"; }
 eq "chat: an interrupted turn reports the no-reply code instead of hanging" "4" "$(_wreply still 0)"
-eq "chat: a turn with a live spinner still waits out the timeout"           "1" "$(_wreply busy 0)"
-eq "chat: a turn streaming its reply still waits out the timeout"           "1" "$(_wreply changing 0)"
-eq "chat: a codex turn never uses the screen veto"                          "1" "$(_wreply still 0 codex)"
+eq "chat: a turn with a live spinner still waits out the timeout"           "1" "$(_wreply busy 0 claude reply 2)"
+eq "chat: a turn streaming its reply still waits out the timeout"           "1" "$(_wreply changing 0 claude reply 2)"
+eq "chat: a codex turn never uses the screen veto"                          "1" "$(_wreply still 0 codex reply 2)"
 eq "chat: a queued message behind an interrupted turn reports it too"       "4" "$(_wreply still 0 claude queued)"
-eq "chat: a queued message behind a live turn keeps waiting"                "1" "$(_wreply busy 0 claude queued)"
-eq "chat: a queued message behind a streaming turn keeps waiting"           "1" "$(_wreply changing 0 claude queued)"
+eq "chat: a queued message behind a live turn keeps waiting"                "1" "$(_wreply busy 0 claude queued 2)"
+eq "chat: a queued message behind a streaming turn keeps waiting"           "1" "$(_wreply changing 0 claude queued 2)"
 
 _sstate() { ( export CAP="$1" CY="${2:-9}"
               tmux() { case "$*" in *capture-pane*) printf '%s\n' "$CAP" ;; *cursor_y*) printf '%s' "$CY" ;; esac; }
@@ -291,6 +307,18 @@ eq "fleet status: a finished turn reads idle"                               "idl
 eq "fleet status: codex busy is unchanged"                                  "busy" "$(_fstatx "$FIX/codex-busy.jsonl")"
 eq "fleet status: codex finished is idle"                                   "idle" "$(_fstatx "$X")"
 eq "fleet status: codex aborted is idle, not stuck busy"                    "idle" "$(_fstatx "$FIX/codex-aborted.jsonl")"
+SF="${TMPDIR:-/tmp}/ov-latemove-$$"
+_fstatlate() { rm -f "$SF"
+  ( export LATE="$2"
+    _target_ctx() { printf '%%9\tclaude\t%s' "$1"; }
+    _awaiting() { return 1; }
+    _compacting() { return 1; }
+    _nap() { :; }
+    _screen_state() { local n=0; [ -f "$SF" ] && n=$(cat "$SF"); n=$((n + 1)); printf '%s' "$n" >"$SF"
+                      if [ "$n" -ge "$LATE" ]; then printf 'moved'; else printf 'frozen'; fi; }
+    _fleet_status "$1" ) | cut -f3; }
+eq "fleet status: a pane that only moves on the last sample still reads busy" "busy" "$(_fstatlate "$RT" 6)"
+rm -f "$SF"
 
 NS=$(_notify_script)
 eq "notify: the watcher waits on the worker"          "yes" "$(case "$NS" in *'wait "$OVS_TARGET" "$left"'*) echo yes ;; *) echo no ;; esac)"

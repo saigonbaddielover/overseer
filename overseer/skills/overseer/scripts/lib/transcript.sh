@@ -2,8 +2,12 @@
 
 # count of assistant messages that ENDED a turn (stop_reason present and not tool_use).
 # a turn = zero or more tool_use messages then exactly one terminal message, so this counts turns.
+_ended_ids() {
+  jq -r 'select(.type=="assistant" and .message.stop_reason!=null and .message.stop_reason!="tool_use")
+         | .message.id // "rec-\(input_line_number)"' 2>/dev/null | awk '!seen[$0]++'
+}
 _turn_count() {
-  local n; n=$(jq -c 'select(.type=="assistant" and .message.stop_reason!=null and .message.stop_reason!="tool_use")' "$1" 2>/dev/null | wc -l)
+  local n; n=$(_ended_ids <"$1" | wc -l)
   echo "${n:-0}"
 }
 _last_stop() { jq -r 'select(.type=="assistant") | .message.stop_reason // empty' "$1" 2>/dev/null | tail -1; }
@@ -110,7 +114,7 @@ _fsize() { stat -c %s "$1" 2>/dev/null || echo 0; }
 _turns_after() {
   local kind="$1" path="$2" off="$3"
   case "$kind" in
-    claude) tail -c "+$((off + 1))" "$path" 2>/dev/null | jq -c 'select(.type=="assistant" and .message.stop_reason!=null and .message.stop_reason!="tool_use")' 2>/dev/null | wc -l ;;
+    claude) tail -c "+$((off + 1))" "$path" 2>/dev/null | _ended_ids | wc -l ;;
     codex)  tail -c "+$((off + 1))" "$path" 2>/dev/null | jq -c 'select(.type=="event_msg" and .payload.type=="task_complete")' 2>/dev/null | wc -l ;;
   esac
 }
