@@ -146,6 +146,15 @@ _win_call() {
   printf '%s' "$out"
 }
 _win_clear_box() { _win_client clear >/dev/null 2>&1 || return 1; }
+_win_box_text() {
+  local n
+  n=$(printf '%s\n' "$1" | grep -nE '^[[:space:]]*[>❯›]' | tail -1 | cut -d: -f1)
+  [ -n "$n" ] || return 0
+  printf '%s\n' "$1" | tail -n "+$n" |
+    awk -v rule='─' 'index($0, rule) { exit } { printf "%s", $0 }' |
+    sed -E 's/^[[:space:]]*[>❯›][[:space:]]*//'
+}
+_win_squash() { printf '%s' "$1" | sed "s/$(printf '\302\240')/ /g" | tr -d '[:space:]'; }
 _win_deliver() {
   local target="$1" kind="$2" msg="$3" b64 want nl i snap chip got
   msg=$(printf '%s' "$msg" | LC_ALL=C tr -d '\000-\010\013-\037\177')
@@ -163,6 +172,7 @@ _win_deliver() {
     if [ "$nl" = 0 ]; then
       got=$(printf '%s\n' "$snap" | sed -nE 's/^[[:space:]]*[>❯›][[:space:]]*(.*[^[:space:]])[[:space:]]*$/\1/p' | tail -1)
       [ "$got" = "$want" ] && return 0
+      [ -n "$got" ] && [ "$(_win_squash "$(_win_box_text "$snap")")" = "$(_win_squash "$want")" ] && return 0
     else
       chip=$(printf '%s\n' "$snap" | grep -oE 'Pasted text #[0-9]+ \+[0-9]+ lines' | tail -1)
       if [ -n "$chip" ]; then
@@ -388,7 +398,7 @@ _win_place() {
     _WLASTSIG="$_WSIG"
     if [ "$force" = 0 ] && _win_agent_busy "$_WKIND" "$tmp"; then
       _unlock_pane
-      _die "the agent on $target looks mid-turn; wait: overseer win $target wait — or interrupt it: overseer win $target keys Escape. If it is actually idle (a turn was aborted mid-tool), rerun with --force"
+      _die "the agent on $target looks mid-turn; wait: overseer win $target wait — or interrupt it: overseer win $target keys $([ "$_WKIND" = codex ] && printf Escape || printf C-c). If it is actually idle (a turn was aborted mid-tool), rerun with --force"
     fi
   fi
   if ! _win_deliver "$target" "$_WKIND" "$prompt"; then

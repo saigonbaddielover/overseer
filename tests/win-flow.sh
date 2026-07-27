@@ -113,10 +113,10 @@ out=$( _mock; MOCK_TXFILE="$RTX"; MOCK_SNAP_MOVE=1; cmd_win host wait 2>&1 )
 lacks "win wait does not call a text-only turn idle"       "$out" 'idle'
 has   "win wait keeps waiting on a text-only turn"         "$out" 'timeout after'
 
-out=$( _mock; MOCK_TXFILE="$RTX"; cmd_win host wait 2>&1 )
+out=$( _mock; MOCK_TXFILE="$RTX"; cmd_win host wait 60 2>&1 )
 has   "win wait reports an interrupted turn as idle"       "$out" 'idle'
 
-out=$( _mock; MOCK_TXFILE="$RTX"; cmd_win host chat --yes --force 'hello' 2>&1 )
+out=$( _mock; MOCK_TXFILE="$RTX"; cmd_win host chat --yes --force 'hello' 60 2>&1 )
 has   "win chat reports an interrupted turn, not a timeout" "$out" 'stopped without producing a reply'
 
 out=$( _mock; MOCK_KIND=codex; MOCK_TXFILE="$FIX/codex-busy.jsonl"; cmd_win host wait 2>&1 )
@@ -146,6 +146,16 @@ has   "unverified delivery aborts"            "$out" 'could not place/verify'
 lacks "unverified delivery never submits"     "$(calls)" 'key '
 ( _mock; MOCK_SNAP='> something else entirely'; cmd_win host chat --yes 'hello' ) >/dev/null 2>&1
 eq    "unverified delivery clears the box"    "yes" "$(cleared_after_paste)"
+
+WRAPBOX=$(cat "$FIX/win-snap-wrapped-box.txt")
+LONGP='Write a 1200-word essay on the history of the semicolon in English prose. Answer entirely from your own knowledge in one message: do NOT use any tool, do NOT read or write any file, do NOT run any command.'
+out=$( _mock; MOCK_SNAP="$WRAPBOX"; cmd_win host chat --yes "$LONGP" 2>&1 )
+lacks "a prompt wrapped across box lines verifies" "$out" 'could not place/verify'
+has   "a wrapped prompt is submitted"              "$(calls)" 'key -Name Enter'
+
+out=$( _mock; MOCK_SNAP="$WRAPBOX"; cmd_win host chat --yes "$LONGP and one more clause that never landed" 2>&1 )
+has   "a partly-landed wrapped prompt aborts"      "$out" 'could not place/verify'
+lacks "a partly-landed wrapped prompt never submits" "$(calls)" 'key '
 
 printf -- '-- win send (fire-and-confirm, no reply wait)\n'
 

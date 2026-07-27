@@ -144,7 +144,7 @@ For a Windows target, `OVERSEER_WIN_CLAUDE` (default `claude`) and `OVERSEER_WIN
 installed under another name there, e.g. a wrapper:
 
 ```
-OVERSEER_WIN_CLAUDE=claudeep overseer win win-host start claude
+OVERSEER_WIN_CLAUDE=claude-wrapper overseer win win-host start claude
 ```
 
 The broker's `kind` stays `claude`/`codex`, so turn detection is unaffected. The value must be a bare

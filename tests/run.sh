@@ -116,6 +116,15 @@ eq "a real menu under a numbered reply is found" "awaiting" \
 eq "a menu not starting at 1 still counts"    "awaiting" "$(_aw "$(printf 'Proceed?\n❯ 4. Yes\n  5. No\n')")"
 eq "a lone marked option is not a menu"       "no"       "$(_aw "$(printf 'Proceed?\n❯ 1. Yes\n')")"
 
+WRAPBOX=$(cat "$FIX/win-snap-wrapped-box.txt")
+LONGP='Write a 1200-word essay on the history of the semicolon in English prose. Answer entirely from your own knowledge in one message: do NOT use any tool, do NOT read or write any file, do NOT run any command.'
+eq "win box: wrapped lines rejoin to the whole prompt" "$(_win_squash "$LONGP")" "$(_win_squash "$(_win_box_text "$WRAPBOX")")"
+eq "win box: reads the composer, not the transcript echo" "" \
+   "$(case "$(_win_box_text "$WRAPBOX")" in *OVERSEER-OK*) echo leaked ;; esac)"
+eq "win box: a single-line box is unchanged"  "hello"    "$(_win_box_text '> hello')"
+eq "win box: no composer yields nothing"      ""         "$(_win_box_text 'just some output')"
+eq "win squash: a nbsp gutter matches a space" "ab"      "$(_win_squash "a$(printf '\302\240')b")"
+
 _ia() { _is_active_text "$1" "$2" && echo active || echo no; }
 eq "menu: numbered highlighted item is active"      "active" \
    "$(_ia "$(printf '   \033[38;5;153m❯\033[39m \033[38;5;246m4. \033[38;5;153mSonnet\033[39m   Sonnet 5\n')" Sonnet)"

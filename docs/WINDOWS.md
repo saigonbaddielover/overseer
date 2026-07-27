@@ -170,6 +170,14 @@ is not evidence, because a mangled prompt can still *look* plausible in the grid
   carries the glyph, since a real menu marks only the selected row.
   `tests/fixtures/awaiting-windows-console.txt` is a real capture guarding the positive case;
   `awaiting-none-markdown-quote.txt` and `awaiting-none-numbered-list.txt` guard the negatives.
+- **The composer soft-wraps, and only its first line carries the `>` marker.** Overflow continues on
+  gutter-indented lines until the box's closing rule, and a break that falls on a space swallows that
+  space. Verifying a paste by comparing the message against the marker line alone therefore fails for
+  anything wider than the console — the old behaviour was `could not place/verify the prompt` on every
+  long single-line prompt, box cleared, nothing sent. `_win_box_text` joins the marker line with its
+  continuations and `_win_squash` compares with all whitespace removed, which is exact in content and
+  blind to where the wrap fell. `tests/fixtures/win-snap-wrapped-box.txt` is a real capture of a
+  three-line wrap.
 - `Split-Path -Leaf` returns **empty** for `\\.\pipe\<name>` — PowerShell treats it as a UNC root.
 - `[System.Diagnostics.Process]::Start($psi)` can return a *String* in this context, and the child's
   "first descendant" may be `conhost`, not the agent. `Start-Process -PassThru` gives the exact pid.
@@ -196,8 +204,8 @@ its default auth and reply `Not logged in`.
 
 **The command name itself is per-host**, so it is injected, not hardcoded: `OVERSEER_WIN_CLAUDE` and
 `OVERSEER_WIN_CODEX` on the controller (defaults `claude` / `codex`) name what `win <host> start` runs there.
-A host whose users go through a wrapper — `claudeep` rather than `claude`, say — needs
-`OVERSEER_WIN_CLAUDE=claudeep`, and gets the same `Not logged in` reply if it does not. The value is
+A host whose users go through a wrapper — `claude-wrapper` rather than `claude`, say — needs
+`OVERSEER_WIN_CLAUDE=claude-wrapper`, and gets the same `Not logged in` reply if it does not. The value is
 restricted to a bare command name, travels base64-encoded, and is decoded into a parameter rather than
 interpolated, for the same reason `workdir` is. The broker's `kind` stays `claude`/`codex`, so the
 transcript readers and turn detection are untouched.

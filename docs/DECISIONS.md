@@ -380,3 +380,11 @@ same text-only blind spot. They now use the same shape — `_win_agent_busy` and
   never to a false idle. That is the right direction to fail in.
 - **Samples are ssh round trips**, so the veto samples on the loop's every-8th iteration (~4s) rather
   than Linux's ~2s, and `_win_agent_busy` caps at four extra snapshots.
+
+Live-verified against a real Windows broker. A 1200-word text-only turn ran with **no status row at the
+bottom of the console at any point** — the same blind spot measured on Linux — and `win wait` reported
+`still running` throughout, then `idle` at the end while `win chat` returned the full reply. Interrupting
+a second turn mid-stream with `win <host> keys C-c` froze the grid; `win wait` reported `idle` at once and
+the in-flight `win chat` returned the "stopped without producing a reply" error **60–90s** later, bounded
+by the round-trip sampling rather than by `[timeout]`. The idle grid on that host hashed identically
+across repeated snapshots, so the ticking-element caveat above did not apply to it.
