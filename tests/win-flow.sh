@@ -40,14 +40,17 @@ _mock() {
   MOCK_LOG="$TMP/calls"; : > "$MOCK_LOG"
   MOCK_KIND=claude MOCK_ALIVE=True MOCK_MTIME=100 MOCK_SIZE=200 MOCK_TX='C:/tx.jsonl'
   MOCK_FETCH_OK=1 MOCK_KEY_OK=1 MOCK_TXFILE="$FIX/claude-turn.jsonl"
-  MOCK_SNAP='> hello'
+  MOCK_SNAP='> hello'; MOCK_SNAP_MOVE=0; rm -f "$TMP/snapn"
   _WH=host _WP=overseer-broker
   _win_client() {
     printf '%s %s\n' "$1" "${2:-}" >> "$MOCK_LOG"
     case "$1" in
       stat) printf 'OK kind=%s alive=%s mtime=%s size=%s transcript=%s\n' \
               "$MOCK_KIND" "$MOCK_ALIVE" "$MOCK_MTIME" "$MOCK_SIZE" "$MOCK_TX" ;;
-      snap) printf '%s\n' "$MOCK_SNAP" ;;
+      snap) if [ "${MOCK_SNAP_MOVE:-0}" = 1 ]; then
+              _sn=$(cat "$TMP/snapn" 2>/dev/null || echo 0); _sn=$((_sn + 1)); printf '%s' "$_sn" >"$TMP/snapn"
+              printf '%s %s\n' "$MOCK_SNAP" "$_sn"
+            else printf '%s\n' "$MOCK_SNAP"; fi ;;
       key)  [ "$MOCK_KEY_OK" = 1 ] || return 1; printf 'OK key\n' ;;
       *)    printf 'OK %s\n' "$1" ;;
     esac
@@ -94,6 +97,30 @@ lacks "mid-turn refusal never submits"        "$(calls)" 'key '
 
 out=$( _mock; MOCK_TXFILE="$FIX/claude-busy.jsonl"; cmd_win host chat --yes --force 'hello' 2>&1 )
 has   "--force bypasses the mid-turn guard"   "$(calls)" 'key -Name Enter'
+
+RTX="$FIX/claude-running-text.jsonl"
+out=$( _mock; MOCK_TXFILE="$RTX"; MOCK_SNAP_MOVE=1; cmd_win host chat --yes 'hello' 2>&1 )
+has   "a text-only turn with a moving screen is mid-turn"  "$out" 'looks mid-turn'
+lacks "text-only mid-turn never submits"                   "$(calls)" 'key '
+
+out=$( _mock; MOCK_TXFILE="$RTX"; MOCK_SNAP='✻ Booping… (1m 5s · thinking)'; cmd_win host chat --yes 'hello' 2>&1 )
+has   "a text-only turn with a live spinner is mid-turn"   "$out" 'looks mid-turn'
+
+out=$( _mock; MOCK_TXFILE="$RTX"; cmd_win host chat --yes 'hello' 2>&1 )
+has   "an interrupted (frozen) agent is not blocked from receiving" "$(calls)" 'key -Name Enter'
+
+out=$( _mock; MOCK_TXFILE="$RTX"; MOCK_SNAP_MOVE=1; cmd_win host wait 2>&1 )
+lacks "win wait does not call a text-only turn idle"       "$out" 'idle'
+has   "win wait keeps waiting on a text-only turn"         "$out" 'timeout after'
+
+out=$( _mock; MOCK_TXFILE="$RTX"; cmd_win host wait 2>&1 )
+has   "win wait reports an interrupted turn as idle"       "$out" 'idle'
+
+out=$( _mock; MOCK_TXFILE="$RTX"; cmd_win host chat --yes --force 'hello' 2>&1 )
+has   "win chat reports an interrupted turn, not a timeout" "$out" 'stopped without producing a reply'
+
+out=$( _mock; MOCK_KIND=codex; MOCK_TXFILE="$FIX/codex-busy.jsonl"; cmd_win host wait 2>&1 )
+lacks "codex on windows never uses the screen veto"        "$out" 'idle'
 
 out=$( _mock; MOCK_KIND=pwsh; cmd_win host chat --yes 'hello' 2>&1 )
 has   "win chat refuses a pwsh broker"        "$out" 'not an agent'

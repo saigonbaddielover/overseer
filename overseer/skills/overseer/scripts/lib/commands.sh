@@ -216,9 +216,14 @@ _agent_busy() {
   _h_running "$kind" "$path" || return 1
   [ "$kind" = claude ] || return 0
   a=$(_screen_state "$pane"); [ "$a" = busy ] && return 0
-  _nap; _nap; _nap
-  b=$(_screen_state "$pane")
-  [ "$b" != "$a" ]
+  local i
+  for i in $(seq 1 6); do
+    _nap; _nap
+    b=$(_screen_state "$pane")
+    { [ "$b" = busy ] || [ "$b" != "$a" ]; } && return 0
+    a="$b"
+  done
+  return 1
 }
 _fleet_status() {
   local pane="$1" ctx kind path state

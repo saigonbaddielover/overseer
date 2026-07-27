@@ -363,5 +363,20 @@ poll loop to debounce over.
 ### Revisit this decision if
 
 - A turn can render nothing at all for ~8s while alive (a long silent tool with the status row hidden
-  would do it) — then the debounce, not the evidence, is what needs raising.
+  would do it) — then the debounce, not the evidence, is what needs raising. Measured on 2026-07-27
+  against a ~75s foreground CPU-bound Bash call: the spinner stayed up for **every** sample, so the
+  status row is only dropped while streaming *text*, and the veto cannot fire during a tool.
 - Claude Code starts recording interrupts, which retires the whole screen path.
+
+### Applied to the Windows path (0.37.1)
+
+`win wait` and the `win chat`/`send` mid-turn guard carried the pre-0.35.0 `_h_is_busy` and so had the
+same text-only blind spot. They now use the same shape — `_win_agent_busy` and a debounced veto inside
+`_win_wait_turn` — over the broker's `SNAP` grid. Two deliberate differences:
+
+- **The whole grid is hashed.** `SNAP` reports characters, not a cursor position, so there is no way to
+  locate the input box and exclude what sits below it. A console with a ticking element therefore always
+  looks like it is moving and the veto never fires — degrading to the pre-0.36.0 blocking behaviour,
+  never to a false idle. That is the right direction to fail in.
+- **Samples are ssh round trips**, so the veto samples on the loop's every-8th iteration (~4s) rather
+  than Linux's ~2s, and `_win_agent_busy` caps at four extra snapshots.

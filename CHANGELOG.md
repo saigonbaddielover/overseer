@@ -5,6 +5,34 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.37.1] - 2026-07-27
+
+### Fixed
+
+- **The Windows path never got the busy-detection fixes Linux has had since 0.35.0.** `win wait` and the
+  mid-turn guard on `win chat`/`win send` both asked `_h_is_busy`, so a remote turn that answers without
+  calling a tool read **idle**: `win wait` returned immediately on a working agent, and a delivery could
+  paste straight into a live turn. Both now use `_win_agent_busy` (`_h_is_busy`, else `_h_running`
+  confirmed by the broker's `SNAP` grid still moving), and `_win_wait_turn` carries the same debounced
+  veto, returning **rc=4** so `win wait` reports `idle` and `win chat` says the turn stopped without a
+  reply instead of blocking to `[timeout]`. The Windows snapshot has no cursor position, so the whole
+  grid is hashed rather than just the region above the input box — a host whose console has a ticking
+  element simply never vetoes, which degrades to the old blocking behaviour rather than to a false idle.
+- **`fleet status` could call a streaming turn idle on a single slow frame.** `_agent_busy` compared two
+  samples ~0.75s apart; now it samples up to six times, returning `busy` the moment the screen moves, so
+  a frozen verdict needs ~3s of stillness. A streaming pane still costs one extra sample, an interrupted
+  one costs the full window.
+- **A turn with an extended-thinking block counted as two.** Claude writes the final assistant message as
+  two transcript records — one for the `thinking` block, one for the `text` — sharing a `message.id` and
+  both carrying `stop_reason: end_turn`, so `_turn_count`/`_turns_after` counted 2 per turn (visible in
+  `doctor`'s "parsed N completed turns"). They now count **distinct `message.id`**, falling back to a
+  per-record token when a record has none. A new `claude-thinking-split.jsonl` fixture pins the shape, so
+  a future Claude that flushes the thinking record early — which would make `chat` return before the
+  reply exists — fails the tests instead of shipping silently.
+- A load-sensitive flake in `tests/run.sh`: the waiter tests ran against a 2s deadline, which a busy
+  machine could miss before the veto's sample count was reached. The cases that expect an early return
+  now get a generous timeout; only the cases that *want* the deadline to expire keep a short one.
+
 ## [0.37.0] - 2026-07-26
 
 ### Fixed

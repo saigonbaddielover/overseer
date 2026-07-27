@@ -105,7 +105,28 @@ _win_field() {
   esac
 }
 _win_snap() { _win_client snap | sed "s/$(printf '\302\240')/ /g"; }
-_win_awaiting() { _awaiting_text "$(_win_snap)" '❯›>'; }
+_win_awaiting_snap() { _awaiting_text "$1" '❯›>'; }
+_win_awaiting() { _win_awaiting_snap "$(_win_snap)"; }
+_win_screen_state() {
+  local snap="$1"
+  [ -n "$snap" ] || { printf 'busy'; return 0; }
+  { _thinking_text "$snap" || _queued_text "$snap"; } && { printf 'busy'; return 0; }
+  printf '%s' "$snap" | cksum | tr -d ' '
+}
+_win_agent_busy() {
+  local kind="$1" path="$2" a b i
+  _h_is_busy "$kind" "$path" && return 0
+  _h_running "$kind" "$path" || return 1
+  [ "$kind" = claude ] || return 0
+  a=$(_win_screen_state "$(_win_snap)"); [ "$a" = busy ] && return 0
+  for i in $(seq 1 4); do
+    _nap; _nap
+    b=$(_win_screen_state "$(_win_snap)")
+    { [ "$b" = busy ] || [ "$b" != "$a" ]; } && return 0
+    a="$b"
+  done
+  return 1
+}
 _win_is_active_text() { printf '%s\n' "$1" | grep -qE "[>❯›][^A-Za-z]*$2"; }
 _win_report_awaiting() {
   printf 'awaiting input — the agent is asking:\n%s\n\nanswer it, then read the reply, e.g.:\n  overseer win %s keys <n>            (choose a numbered option; add "overseer win %s keys Enter" if it needs confirming)\n  overseer win %s keys "<text>" Enter (type free-text into the prompt)\n  overseer win %s read\n' \
@@ -158,7 +179,7 @@ _win_deliver() {
 _win_sig() { printf '%s:%s' "$(_win_field "$1" mtime)" "$(_win_field "$1" size)"; }
 _win_wait_turn() {
   local kind="$1" base="$2" lastsig="$3" timeout="$4" tmp="$5"
-  local deadline=$((SECONDS + timeout)) st tx sig cur i=0
+  local deadline=$((SECONDS + timeout)) st tx sig cur i=0 snap scr quiet=0 lastscr=''
   while [ "$SECONDS" -lt "$deadline" ]; do
     _nap; _nap
     i=$((i + 1))
@@ -173,7 +194,15 @@ _win_wait_turn() {
         [ "$cur" -gt "$base" ] && return 0
       fi
     fi
-    [ $((i % 8)) = 0 ] && _win_awaiting >/dev/null && return 2
+    if [ $((i % 8)) = 0 ]; then
+      snap=$(_win_snap) || snap=''
+      [ -n "$snap" ] && _win_awaiting_snap "$snap" >/dev/null && return 2
+      scr=$(_win_screen_state "$snap")
+      if [ "$scr" != busy ] && [ "$scr" = "$lastscr" ] && [ "$kind" = claude ] && _h_running "$kind" "$tmp"; then
+        quiet=$((quiet + 1)); [ "$quiet" -ge 4 ] && return 4
+      else quiet=0; fi
+      lastscr="$scr"
+    fi
   done
   return 1
 }
@@ -330,13 +359,13 @@ _win_wait() {
   [ -n "$_WTX" ] || _die "no transcript yet for '$target' (a brand-new session with 0 turns has none)"
   local tmp; tmp=$(mktemp "${TMPDIR:-/tmp}/overseer-wintx.XXXXXX") || _die "mktemp failed"
   _win_fetch "$_WH" "$_WTX" "$tmp" || { rm -f "$tmp"; _die "could not fetch the transcript from $_WH"; }
-  if ! _h_is_busy "$_WKIND" "$tmp"; then rm -f "$tmp"; echo idle; return 0; fi
+  if ! _win_agent_busy "$_WKIND" "$tmp"; then rm -f "$tmp"; echo idle; return 0; fi
   local base rc=0
   base=$(_h_turn_count "$_WKIND" "$tmp"); base="${base:-0}"
   _win_wait_turn "$_WKIND" "$base" "$_WSIG" "$timeout" "$tmp" || rc=$?
   rm -f "$tmp"
   case "$rc" in
-    0) if q=$(_win_awaiting); then _win_report_awaiting "$target" "$q"; else echo idle; fi ;;
+    0|4) if q=$(_win_awaiting); then _win_report_awaiting "$target" "$q"; else echo idle; fi ;;
     2) q=$(_win_awaiting) && _win_report_awaiting "$target" "$q" ;;
     3) _die "the agent on $target exited mid-turn; peek: overseer win $target peek" ;;
     *) _die "timeout after ${timeout}s — the turn is still running on $target" ;;
@@ -357,7 +386,7 @@ _win_place() {
     fi
     _WBASE=$(_h_turn_count "$_WKIND" "$tmp"); _WBASE="${_WBASE:-0}"
     _WLASTSIG="$_WSIG"
-    if [ "$force" = 0 ] && _h_is_busy "$_WKIND" "$tmp"; then
+    if [ "$force" = 0 ] && _win_agent_busy "$_WKIND" "$tmp"; then
       _unlock_pane
       _die "the agent on $target looks mid-turn; wait: overseer win $target wait — or interrupt it: overseer win $target keys Escape. If it is actually idle (a turn was aborted mid-tool), rerun with --force"
     fi
@@ -396,6 +425,7 @@ _win_chat() {
        printf '## reply:\n%s\n' "$reply"; rm -f "$tmp" ;;
     2) rm -f "$tmp"; q=$(_win_awaiting) && _win_report_awaiting "$target" "$q" ;;
     3) rm -f "$tmp"; _die "the agent on $target exited mid-turn — no reply was produced; peek: overseer win $target peek" ;;
+    4) rm -f "$tmp"; _die "the turn on $target stopped without producing a reply — it was interrupted, or the agent is blocked on something overseer cannot read; the prompt WAS delivered, so do not blindly resend: peek: overseer win $target peek" ;;
     *) rm -f "$tmp"; _die "timeout after ${timeout}s — the turn is still running. Do NOT rerun win chat (it would send the prompt again); resume waiting instead: overseer win $target wait   then   overseer win $target read" ;;
   esac
 }
