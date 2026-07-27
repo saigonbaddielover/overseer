@@ -5,6 +5,24 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.37.2] - 2026-07-27
+
+### Fixed
+
+- **An interrupted Codex turn blocked `chat` to the full timeout.** The screen veto added in 0.37.0 is
+  Claude-only, and a Codex turn that is interrupted (`Escape`) never writes the `task_complete` its turn
+  count is keyed on — so `wait` correctly reported `idle` while `chat` kept polling for a turn that would
+  never arrive. Measured live at the full 300s. Codex needs no screen heuristic: it records
+  `turn_aborted`, so `_wait_reply`, `_wait_queued_reply` and `_win_wait_turn` now return **rc=4** when a
+  turn they have already seen running stops running without advancing the count. The "already seen
+  running" latch keeps the delivery-to-first-record window from reading as an abort.
+- **A long prompt could not be delivered to Codex** — including on Windows, where 0.37.1 had just fixed
+  the same class of bug for Claude. Claude's composer is closed by a box rule, Codex's by a blank line
+  before its status row, so joining the wrapped composer lines ran on into the status row and never
+  matched. `_win_box_text` now stops at either. `win-snap-wrapped-box-codex.txt` is a real capture.
+- The `chat` no-reply error named only `Ctrl-C` as the interrupt; it now names `Ctrl-C` for Claude and
+  `Escape` for Codex, both confirmed live on Linux and on a Windows console.
+
 ## [0.37.1] - 2026-07-27
 
 ### Fixed

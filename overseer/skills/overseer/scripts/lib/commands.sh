@@ -184,7 +184,7 @@ cmd_chat() {
        else printf '## reply:\n%s\n' "$(_h_reply_for "$kind" "$path" "$msg")"; fi ;;
     2) _report_awaiting "$pane" "$target" ;;
     3) _die "the agent in $pane exited mid-turn (its pane dropped to a shell) — no reply was produced; peek: overseer peek $target" ;;
-    4) _die "the turn in $pane stopped without producing a reply — it was interrupted (Ctrl-C in that pane), or the agent is blocked on something overseer cannot read; the message WAS delivered, so do not blindly resend: peek: overseer peek $target" ;;
+    4) _die "the turn in $pane stopped without producing a reply — it was interrupted (Ctrl-C for claude, Escape for codex, in that pane), or the agent is blocked on something overseer cannot read; the message WAS delivered, so do not blindly resend: peek: overseer peek $target" ;;
     *) _die "timeout after ${timeout}s — the turn is still running. Do NOT rerun chat (it would send the message again); resume waiting instead: overseer wait $target   then   overseer read $target" ;;
   esac
 }

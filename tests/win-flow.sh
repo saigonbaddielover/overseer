@@ -39,13 +39,18 @@ trap 'rm -rf "$TMP"' EXIT INT TERM
 _mock() {
   MOCK_LOG="$TMP/calls"; : > "$MOCK_LOG"
   MOCK_KIND=claude MOCK_ALIVE=True MOCK_MTIME=100 MOCK_SIZE=200 MOCK_TX='C:/tx.jsonl'
-  MOCK_FETCH_OK=1 MOCK_KEY_OK=1 MOCK_TXFILE="$FIX/claude-turn.jsonl"
-  MOCK_SNAP='> hello'; MOCK_SNAP_MOVE=0; rm -f "$TMP/snapn"
+  MOCK_FETCH_OK=1 MOCK_KEY_OK=1 MOCK_TXFILE="$FIX/claude-turn.jsonl" MOCK_TXFILE2='' MOCK_TXSWITCH=1
+  MOCK_SNAP='> hello'; MOCK_SNAP_MOVE=0; MOCK_MTIME_MOVE=0
+  rm -f "$TMP/snapn" "$TMP/mtn" "$TMP/fetched"
   _WH=host _WP=overseer-broker
   _win_client() {
     printf '%s %s\n' "$1" "${2:-}" >> "$MOCK_LOG"
     case "$1" in
-      stat) printf 'OK kind=%s alive=%s mtime=%s size=%s transcript=%s\n' \
+      stat) if [ "${MOCK_MTIME_MOVE:-0}" = 1 ]; then
+              _mt=$(cat "$TMP/mtn" 2>/dev/null || echo 0); _mt=$((_mt + 1)); printf '%s' "$_mt" >"$TMP/mtn"
+              MOCK_MTIME=$((100 + _mt))
+            fi
+            printf 'OK kind=%s alive=%s mtime=%s size=%s transcript=%s\n' \
               "$MOCK_KIND" "$MOCK_ALIVE" "$MOCK_MTIME" "$MOCK_SIZE" "$MOCK_TX" ;;
       snap) if [ "${MOCK_SNAP_MOVE:-0}" = 1 ]; then
               _sn=$(cat "$TMP/snapn" 2>/dev/null || echo 0); _sn=$((_sn + 1)); printf '%s' "$_sn" >"$TMP/snapn"
@@ -58,6 +63,8 @@ _mock() {
   _win_fetch() {
     printf 'fetch %s\n' "$2" >> "$MOCK_LOG"
     [ "$MOCK_FETCH_OK" = 1 ] || return 1
+    _fn=$(cat "$TMP/fetched" 2>/dev/null || echo 0); _fn=$((_fn + 1)); printf '%s' "$_fn" >"$TMP/fetched"
+    if [ -n "${MOCK_TXFILE2:-}" ] && [ "$_fn" -gt "${MOCK_TXSWITCH:-1}" ]; then cp "$MOCK_TXFILE2" "$3"; return 0; fi
     cp "$MOCK_TXFILE" "$3"
   }
   _lock_pane()   { printf 'lock\n'   >> "$MOCK_LOG"; }
@@ -122,6 +129,16 @@ has   "win chat reports an interrupted turn, not a timeout" "$out" 'stopped with
 out=$( _mock; MOCK_KIND=codex; MOCK_TXFILE="$FIX/codex-busy.jsonl"; cmd_win host wait 2>&1 )
 lacks "codex on windows never uses the screen veto"        "$out" 'idle'
 
+out=$( _mock; MOCK_KIND=codex; MOCK_MTIME_MOVE=1; MOCK_TXSWITCH=2
+       MOCK_TXFILE="$FIX/codex-busy.jsonl"; MOCK_TXFILE2="$FIX/codex-aborted.jsonl"
+       cmd_win host chat --yes --force 'hello' 60 2>&1 )
+has   "an aborted codex turn reports the no-reply code"    "$out" 'stopped without producing a reply'
+
+out=$( _mock; MOCK_KIND=codex; MOCK_MTIME_MOVE=1
+       MOCK_TXFILE="$FIX/codex-aborted.jsonl"; MOCK_TXFILE2="$FIX/codex-aborted.jsonl"
+       cmd_win host chat --yes 'hello' 2>&1 )
+has   "a codex turn not yet started is not read as aborted" "$out" 'timeout after'
+
 out=$( _mock; MOCK_KIND=pwsh; cmd_win host chat --yes 'hello' 2>&1 )
 has   "win chat refuses a pwsh broker"        "$out" 'not an agent'
 lacks "pwsh refusal never pastes"             "$(calls)" 'paste '
@@ -156,6 +173,12 @@ has   "a wrapped prompt is submitted"              "$(calls)" 'key -Name Enter'
 out=$( _mock; MOCK_SNAP="$WRAPBOX"; cmd_win host chat --yes "$LONGP and one more clause that never landed" 2>&1 )
 has   "a partly-landed wrapped prompt aborts"      "$out" 'could not place/verify'
 lacks "a partly-landed wrapped prompt never submits" "$(calls)" 'key '
+
+CXBOX=$(cat "$FIX/win-snap-wrapped-box-codex.txt")
+CXP='Write a 2000-word essay on the history of the em dash and the parenthesis in English prose, including a section on typesetting practice. Answer entirely from your own knowledge in a single message.'
+out=$( _mock; MOCK_KIND=codex; MOCK_TXFILE="$FIX/codex-turn.jsonl"; MOCK_SNAP="$CXBOX"; cmd_win host chat --yes "$CXP" 2>&1 )
+lacks "a wrapped prompt verifies in the codex composer" "$out" 'could not place/verify'
+has   "a wrapped codex prompt is submitted"             "$(calls)" 'key -Name Enter'
 
 printf -- '-- win send (fire-and-confirm, no reply wait)\n'
 

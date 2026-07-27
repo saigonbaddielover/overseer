@@ -151,7 +151,7 @@ _win_box_text() {
   n=$(printf '%s\n' "$1" | grep -nE '^[[:space:]]*[>❯›]' | tail -1 | cut -d: -f1)
   [ -n "$n" ] || return 0
   printf '%s\n' "$1" | tail -n "+$n" |
-    awk -v rule='─' 'index($0, rule) { exit } { printf "%s", $0 }' |
+    awk -v rule='─' 'index($0, rule) || /^[[:space:]]*$/ { exit } { printf "%s", $0 }' |
     sed -E 's/^[[:space:]]*[>❯›][[:space:]]*//'
 }
 _win_squash() { printf '%s' "$1" | sed "s/$(printf '\302\240')/ /g" | tr -d '[:space:]'; }
@@ -189,7 +189,7 @@ _win_deliver() {
 _win_sig() { printf '%s:%s' "$(_win_field "$1" mtime)" "$(_win_field "$1" size)"; }
 _win_wait_turn() {
   local kind="$1" base="$2" lastsig="$3" timeout="$4" tmp="$5"
-  local deadline=$((SECONDS + timeout)) st tx sig cur i=0 snap scr quiet=0 lastscr=''
+  local deadline=$((SECONDS + timeout)) st tx sig cur i=0 snap scr quiet=0 lastscr='' seen=0
   while [ "$SECONDS" -lt "$deadline" ]; do
     _nap; _nap
     i=$((i + 1))
@@ -202,6 +202,10 @@ _win_wait_turn() {
       if _win_fetch "$_WH" "$tx" "$tmp"; then
         cur=$(_h_turn_count "$kind" "$tmp"); cur="${cur:-0}"
         [ "$cur" -gt "$base" ] && return 0
+        if [ "$kind" = codex ]; then
+          if _h_running "$kind" "$tmp"; then seen=1
+          elif [ "$seen" = 1 ]; then return 4; fi
+        fi
       fi
     fi
     if [ $((i % 8)) = 0 ]; then
