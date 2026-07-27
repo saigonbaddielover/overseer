@@ -177,7 +177,13 @@ is not evidence, because a mangled prompt can still *look* plausible in the grid
   long single-line prompt, box cleared, nothing sent. `_win_box_text` joins the marker line with its
   continuations and `_win_squash` compares with all whitespace removed, which is exact in content and
   blind to where the wrap fell. `tests/fixtures/win-snap-wrapped-box.txt` is a real capture of a
-  three-line wrap.
+  three-line wrap. **The two agents close the composer differently** — Claude draws a box rule under it,
+  Codex leaves a blank line before its status row — so the join stops at either, and
+  `win-snap-wrapped-box-codex.txt` pins the Codex shape.
+- **`keys Escape` does interrupt a running Codex turn on the Windows console**, even though a raw `ESC`
+  *byte* never reaches the child: the broker sends it as a key event (`vk=0x1B`), not as paste text.
+  Verified live — the rollout gets `turn_aborted` and the TUI prints `Conversation interrupted`. Claude
+  behaves as on Linux: Escape does nothing, one `C-c` interrupts.
 - `Split-Path -Leaf` returns **empty** for `\\.\pipe\<name>` — PowerShell treats it as a UNC root.
 - `[System.Diagnostics.Process]::Start($psi)` can return a *String* in this context, and the child's
   "first descendant" may be `conhost`, not the agent. `Start-Process -PassThru` gives the exact pid.

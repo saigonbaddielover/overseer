@@ -1,6 +1,6 @@
 {
   "name": "overseer",
-  "version": "0.37.1",
+  "version": "0.37.2",
   "description": "One agent that oversees others: drive and read other agent sessions (Claude Code, Codex) and shells, turn-based, from outside — in Linux tmux panes (local or over ssh) and in native Windows consoles on a remote desktop. Linux controller.",
   "author": {
     "name": "saigonbaddielover"

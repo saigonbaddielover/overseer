@@ -121,6 +121,11 @@ LONGP='Write a 1200-word essay on the history of the semicolon in English prose.
 eq "win box: wrapped lines rejoin to the whole prompt" "$(_win_squash "$LONGP")" "$(_win_squash "$(_win_box_text "$WRAPBOX")")"
 eq "win box: reads the composer, not the transcript echo" "" \
    "$(case "$(_win_box_text "$WRAPBOX")" in *OVERSEER-OK*) echo leaked ;; esac)"
+CXBOX=$(cat "$FIX/win-snap-wrapped-box-codex.txt")
+CXPROMPT='Write a 2000-word essay on the history of the em dash and the parenthesis in English prose, including a section on typesetting practice. Answer entirely from your own knowledge in a single message.'
+eq "win box: the codex composer has no closing rule, only a blank line" "$(_win_squash "$CXPROMPT")" "$(_win_squash "$(_win_box_text "$CXBOX")")"
+eq "win box: the codex status line stays out of the composer" "" \
+   "$(case "$(_win_box_text "$CXBOX")" in *Context*) echo leaked ;; esac)"
 eq "win box: a single-line box is unchanged"  "hello"    "$(_win_box_text '> hello')"
 eq "win box: no composer yields nothing"      ""         "$(_win_box_text 'just some output')"
 eq "win squash: a nbsp gutter matches a space" "ab"      "$(_win_squash "a$(printf '\302\240')b")"
@@ -260,6 +265,21 @@ eq "chat: a codex turn never uses the screen veto"                          "1" 
 eq "chat: a queued message behind an interrupted turn reports it too"       "4" "$(_wreply still 0 claude queued)"
 eq "chat: a queued message behind a live turn keeps waiting"                "1" "$(_wreply busy 0 claude queued 2)"
 eq "chat: a queued message behind a streaming turn keeps waiting"           "1" "$(_wreply changing 0 claude queued 2)"
+
+CXF="${TMPDIR:-/tmp}/ov-cxrun-$$"
+_wreplycx() { ( export SCREEN=still RUN=1 CXF; printf '%s' "${1:-2}" >"$CXF"
+                _stubs
+                _h_running() { local n; n=$(cat "$CXF" 2>/dev/null || echo 0)
+                               [ "$n" -le 0 ] && return 1
+                               printf '%s' "$((n - 1))" >"$CXF"; return 0; }
+                case "${3:-reply}" in
+                  reply)  _wait_reply codex /nope 0 "${2:-20}" "" 0 %9 "" ;;
+                  queued) _wait_queued_reply codex /nope "${2:-20}" %9 'msg' ;;
+                esac ); printf '%s' "$?"; }
+eq "chat: an aborted codex turn reports the no-reply code"                  "4" "$(_wreplycx 2)"
+eq "chat: a queued message behind an aborted codex turn reports it too"     "4" "$(_wreplycx 2 20 queued)"
+eq "chat: a codex turn not yet started is not read as aborted"              "1" "$(_wreplycx 0 2)"
+rm -f "$CXF"
 
 _sstate() { ( export CAP="$1" CY="${2:-9}"
               tmux() { case "$*" in *capture-pane*) printf '%s\n' "$CAP" ;; *cursor_y*) printf '%s' "$CY" ;; esac; }

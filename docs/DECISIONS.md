@@ -388,3 +388,13 @@ a second turn mid-stream with `win <host> keys C-c` froze the grid; `win wait` r
 the in-flight `win chat` returned the "stopped without producing a reply" error **60–90s** later, bounded
 by the round-trip sampling rather than by `[timeout]`. The idle grid on that host hashed identically
 across repeated snapshots, so the ticking-element caveat above did not apply to it.
+
+### Codex needs none of this (0.37.2)
+
+The screen veto exists only because an interrupted Claude turn leaves **no trace in the transcript**.
+Codex records `turn_aborted`, which is a fact rather than a heuristic — so the waiters take a direct
+route for it: a turn they have already observed running that stops running without advancing the turn
+count returns the same rc=4. No sampling, no debounce, no screen. The "already observed running" latch
+is what keeps the window between delivery and the first record from reading as an abort. This closes the
+matching hang — `wait` said `idle` while `chat` polled for a `task_complete` that an aborted turn never
+writes, measured at the full 300s timeout — on both the Linux and Windows paths.

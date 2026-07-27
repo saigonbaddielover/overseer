@@ -132,7 +132,7 @@ _turn_advanced() {   # kind path base bbytes
 # every ~2s so a session the hook does not cover still resolves. codex: no hook, so poll the rollout
 # every tick. args: kind, transcript_path, baseline_turn_count, timeout_s, [claude sid], [since_epoch].
 _wait_reply() {
-  local kind="$1" path="$2" base="$3" timeout="${4:-600}" sid="${5:-}" since="${6:-0}" pane="${7:-}" bbytes="${8:-}" i=0 woke=0 cur quiet=0 st lastst=''
+  local kind="$1" path="$2" base="$3" timeout="${4:-600}" sid="${5:-}" since="${6:-0}" pane="${7:-}" bbytes="${8:-}" i=0 woke=0 cur quiet=0 st lastst='' seen=0
   local deadline=$((SECONDS + timeout)) sig last=''
   while [ "$SECONDS" -lt "$deadline" ]; do
     [ "$kind" = claude ] && [ "$woke" = 0 ] && [ -n "$sid" ] && _signal_since "$sid" "$since" && woke=1
@@ -142,6 +142,10 @@ _wait_reply() {
     if { [ "$woke" = 1 ] || [ "$kind" = codex ] || [ $((i % 8)) -eq 0 ]; } && [ "$sig" != "$last" ]; then
       last="$sig"
       _turn_advanced "$kind" "$path" "$base" "$bbytes" && return 0
+      if [ "$kind" = codex ]; then
+        if _h_running "$kind" "$path"; then seen=1
+        elif [ "$seen" = 1 ]; then return 4; fi
+      fi
     fi
     if [ -n "$pane" ] && { { [ "$i" -gt 0 ] && [ $((i % 4)) -eq 0 ]; } || { [ "$kind" = claude ] && [ -n "$sid" ] && _marker_since awaiting "$sid" "$since"; }; } && _awaiting "$pane" >/dev/null 2>&1; then return 2; fi
     if [ -n "$pane" ] && [ "$i" -gt 0 ] && [ $((i % 8)) -eq 0 ]; then
@@ -160,7 +164,7 @@ _wait_reply() {
   return 1
 }
 _wait_queued_reply() {
-  local kind="$1" path="$2" timeout="${3:-600}" pane="$4" msg="$5" i=0 cur sig last='' quiet=0 st lastst=''
+  local kind="$1" path="$2" timeout="${3:-600}" pane="$4" msg="$5" i=0 cur sig last='' quiet=0 st lastst='' seen=0
   local deadline=$((SECONDS + timeout))
   while [ "$SECONDS" -lt "$deadline" ]; do
     if [ -n "$pane" ]; then
@@ -181,6 +185,10 @@ _wait_queued_reply() {
     if [ "$sig" != "$last" ]; then
       last="$sig"
       _h_answered "$kind" "$path" "$msg" && return 0
+      if [ "$kind" = codex ]; then
+        if _h_running "$kind" "$path"; then seen=1
+        elif [ "$seen" = 1 ]; then return 4; fi
+      fi
     fi
     i=$((i + 1)); _nap
   done
