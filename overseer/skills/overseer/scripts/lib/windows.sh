@@ -357,8 +357,11 @@ _win_read() {
   [ -n "$_WTX" ] || _die "no transcript yet for '$target' (a brand-new session with 0 turns has none)"
   local tmp; tmp=$(mktemp "${TMPDIR:-/tmp}/overseer-wintx.XXXXXX") || _die "mktemp failed"
   _win_fetch "$_WH" "$_WTX" "$tmp" || { rm -f "$tmp"; _die "could not fetch the transcript from $_WH"; }
+  local err reply; err=$(_h_last_error "$_WKIND" "$tmp")
+  if [ -n "$err" ]; then reply="(NO REPLY — the turn ended in an API error) ${err#*$'\t'}"
+  else reply=$(_h_last_reply "$_WKIND" "$tmp"); fi
   printf '# host=%s harness=%s\n## last user prompt:\n%s\n\n## last assistant reply:\n%s\n' \
-    "$target" "$_WKIND" "$(_h_last_prompt "$_WKIND" "$tmp")" "$(_h_last_reply "$_WKIND" "$tmp")"
+    "$target" "$_WKIND" "$(_h_last_prompt "$_WKIND" "$tmp")" "$reply"
   rm -f "$tmp"
 }
 _win_wait() {
@@ -435,8 +438,11 @@ _win_chat() {
   _win_wait_turn "$_WKIND" "$_WBASE" "$_WLASTSIG" "$timeout" "$tmp" || rc=$?
   case "$rc" in
     0) if q=$(_win_awaiting); then rm -f "$tmp"; _win_report_awaiting "$target" "$q"; return 0; fi
-       local reply; reply=$(_h_reply_for "$_WKIND" "$tmp" "$prompt"); [ -n "$reply" ] || reply=$(_h_last_reply "$_WKIND" "$tmp")
-       printf '## reply:\n%s\n' "$reply"; rm -f "$tmp" ;;
+       local reply err; err=$(_h_last_error "$_WKIND" "$tmp")
+       reply=$(_h_reply_for "$_WKIND" "$tmp" "$prompt"); [ -n "$reply" ] || reply=$(_h_last_reply "$_WKIND" "$tmp")
+       rm -f "$tmp"
+       _report_error_text "$err" "$target" || true
+       printf '## reply:\n%s\n' "$reply" ;;
     2) rm -f "$tmp"; q=$(_win_awaiting) && _win_report_awaiting "$target" "$q" ;;
     3) rm -f "$tmp"; _die "the agent on $target exited mid-turn — no reply was produced; peek: overseer win $target peek" ;;
     4) rm -f "$tmp"; _die "the turn on $target stopped without producing a reply — it was interrupted, or the agent is blocked on something overseer cannot read; the prompt WAS delivered, so do not blindly resend: peek: overseer win $target peek" ;;

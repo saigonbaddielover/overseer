@@ -96,6 +96,7 @@ All work goes through one script; the agent calls it as
 | `menu <target> <item> [nav-key]` | **Any pane.** Navigate a tab bar / list until `<item>` is highlighted (verify-driven). Default nav key `Right` suits a Claude tab bar; Codex popups are vertical — pass `Down`. |
 | `sh <target> <command> [timeout]` | **Shell.** Run one command line, wait, print output + exit code. |
 | `keys <target> <key>...` | Send raw tmux keys (`Enter`, `Escape`, `Up`, `C-c`, ...). Any pane. |
+| `usage [--json] [target]` | **Account quota + context.** Print, per harness, how much of each **usage window** is spent (`5h`/`7d` for Claude, the rolling window for Codex) with when it resets — and, separately and clearly labelled, the session's **context** fill. Only quota can stop work: context [auto-compacts](#context-is-not-a-health-signal) and is informational. No target = this machine's account; a target reads that pane's session. `--json` for scripts. Claude reports its quota **only to a statusline**, so the collector must be wired in once with `usage --install` (it chains any statusline you already have; `--install --here` when a project-level `statusLine` overrides the user one, `--uninstall` reverses it). A backend with no subscription window — Bedrock/Vertex/an API key/a proxy — reports `quota n/a`, which is normal, not a failure. |
 | `doctor [--live]` | Preflight: check Linux/`/proc`, `tmux`, `jq`, `codex`, and that Claude/Codex session state is where discovery expects it. `--live` (also plain `live`) additionally drives a throwaway pane through a `sh` round-trip to verify the send/capture path end to end; a failing `--live` check makes `doctor` exit non-zero. |
 | `hosts [--list] [--tailscale] [--os NAME] [-u USER] [-t secs]` | **Remote (SSH), fleet survey.** Print one line per host — `HOST ONLINE OS SSH DRIVE`, where `HOST` is the **effective `user@host`** — so you can see which machines you can actually drive, *and as which user*, before an `on`/`win`. The inventory (ssh targets to probe) comes from `$OVERSEER_HOSTS` if set, else `$XDG_CONFIG_HOME/overseer/hosts`, else the non-wildcard `Host` entries of `~/.ssh/config`; or pass `--tailscale` to enumerate the tailnet directly (`--os windows`/`linux` filters it) for machines you never added to ssh config. **The login user** for a bare host (no `user@`) is resolved from `ssh -G` — so an ssh-config `Host … User fleetuser` block is honoured and shown — or forced with `-u USER` / `$OVERSEER_HOSTS_USER` when it lives nowhere (the common "same user across the whole fleet" case). Each host is probed **live and in parallel**: `SSH` is `ok`/`deny`/`unreach`, `OS` is `linux`/`windows`/`macos`, `DRIVE` is `yes` (Linux with `tmux`+`jq`), `no:tmux`/`no:jq`, or `win*` (a Windows broker target). `ONLINE` is filled from `tailscale status` when the CLI is present. Nothing is stored — reachability is computed each run (a cached health value would just be stale). `--list` prints the inventory without probing; `-t` sets the per-host ssh connect timeout (default 6s). |
 | `provision [--dry-run] <host>` | **Remote (SSH).** Install the missing Linux **drive** dependencies (`tmux` + `jq`) on a reachable host — the fix for a `hosts` `DRIVE=no:tmux`/`no:jq`. Detects the package manager (`apt`/`dnf`/`yum`/`pacman`/`zypper`/`apk`), installs only what's absent (idempotent), and needs **root or passwordless `sudo`** on the host (it runs non-interactively). `--dry-run` prints the exact command instead of running it. Linux only, and only the base deps — Claude/Codex agents (and every Windows prerequisite) are still set up by hand. |
@@ -132,9 +133,11 @@ start` is `start`, `win <host> chat` is `chat`, and so on. (The old fused names 
 | **quit** | Gracefully exit the broker's agent TUI with Ctrl-C (twice for Claude) so it can flush on the way out. The broker **closes with it** if the agent was its only child (as on a `start claude` broker) — `stop` is the force-kill alternative. The Windows peer of `quit`. |
 | **stop** | Stop the broker and its child on the host. The Windows peer of `stop`. |
 
-Two environment variables tune the defaults (both validated at startup, so a bad value fails loudly):
-`OVERSEER_TIMEOUT` (default `600`) is the fallback `[timeout]` seconds for `chat`/`wait`/`sh`, and
-`OVERSEER_POLL_INTERVAL` (default `0.25`) is the poll cadence in seconds. Two more point overseer at
+Three environment variables tune the defaults (all validated at startup, so a bad value fails loudly):
+`OVERSEER_TIMEOUT` (default `600`) is the fallback `[timeout]` seconds for `chat`/`wait`/`sh`,
+`OVERSEER_POLL_INTERVAL` (default `0.25`) is the poll cadence in seconds, and `OVERSEER_QUOTA_WARN`
+(default `90`) is the percentage at which `usage` flags a quota window and `chat`/`send`/`wait` print
+a one-line warning to stderr. Two more point overseer at
 non-default state directories: `CLAUDE_HOME` (default `~/.claude`), used to find Claude's session
 files, transcripts and the hook markers. `CODEX_HOME` (default `~/.codex`) is read only by `doctor` —
 live Codex discovery finds the rollout the running process holds open via `/proc`, so it is unaffected.
@@ -319,6 +322,35 @@ dispatcher just like finishing does. It is bounded by `[notify_timeout]` (defaul
 and wakes with that fact rather than disappearing silently. `fleet send --notify <msg>` arms one per
 receiving pane. Local only: the pane to wake exists on this machine, so `--hosts`/`--tailscale` refuse
 the flag.
+
+### Context is not a health signal
+
+A watching agent reliably raises the wrong alarm here, so overseer separates the two numbers by
+design:
+
+- **Context filling up is routine.** Both harnesses auto-compact, so a session at 95% context keeps
+  working — it summarises and carries on. `usage` prints context labelled *informational, never a
+  fault*; it is never a `fleet status` state and never triggers a warning.
+- **Account quota is what actually stops work.** When a usage window reaches 100% the API stops
+  answering, and no amount of waiting inside the turn helps until it resets. That is the number worth
+  watching, and the one `usage` flags at `OVERSEER_QUOTA_WARN` (default 90%).
+
+When a turn *is* killed by a usage limit, overseer says so instead of handing the error back as an
+answer. Claude records the refusal as an ordinary terminal assistant message, so the naive read — the
+one overseer used to do — returns `API Error: …` as if the agent had replied it. `chat`/`wait` now
+detect that record and fail with **exit code 5** and the reset time; `read` marks it `(NO REPLY — the
+turn ended in an API error)`; `fleet status` shows the pane as `api-error` rather than `idle`. A
+transient server error (a 529 overload) is separated out and exits 1, because that one *is* worth
+resending. Codex has no such record — it simply completes the turn with an empty reply — so the same
+verdict comes from its rollout's `rate_limits.rate_limit_reached_type`.
+
+Reading Claude's quota needs one-time wiring, because Claude Code hands `rate_limits` **only to a
+statusline script** — it is in no hook payload and in no file on disk. `usage --install` writes a
+small collector and points `statusLine` at it, chaining whatever statusline was already configured so
+your own status bar keeps rendering. Settings precedence applies: a project-level `.claude/settings.json`
+overrides the user one, and the installer detects that and tells you to rerun with `--install --here`
+(which writes the git-ignored `.claude/settings.local.json`). Codex needs none of this — it writes
+`rate_limits` into every rollout already.
 
 ## Caveats
 

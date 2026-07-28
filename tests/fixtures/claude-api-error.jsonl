@@ -1,0 +1,4 @@
+{"type":"user","sessionId":"test-sid-err","origin":{"kind":"human"},"message":{"content":"do the thing"}}
+{"type":"assistant","sessionId":"test-sid-err","message":{"stop_reason":"tool_use","content":[{"type":"tool_use","name":"Bash"}]}}
+{"type":"user","sessionId":"test-sid-err","message":{"content":[{"type":"tool_result","content":"ok"}]}}
+{"type":"assistant","sessionId":"test-sid-err","isApiErrorMessage":true,"apiErrorStatus":429,"message":{"model":"<synthetic>","stop_reason":"stop_sequence","content":[{"type":"text","text":"API Error: Claude usage limit reached. Your limit will reset at 3pm."}]}}

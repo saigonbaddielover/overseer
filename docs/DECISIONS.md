@@ -398,3 +398,68 @@ count returns the same rc=4. No sampling, no debounce, no screen. The "already o
 is what keeps the window between delivery and the first record from reading as an abort. This closes the
 matching hang — `wait` said `idle` while `chat` polled for a `task_complete` that an aborted turn never
 writes, measured at the full 300s timeout — on both the Linux and Windows paths.
+
+## ADR-0008 — Report **account quota**, not context; a quota-killed turn is an error, never a reply
+
+Two "the agent is running out of something" signals look alike from outside and are not alike at all.
+A watching agent that treats them the same raises a false alarm on the harmless one and misses the
+real one.
+
+**Context is not a health signal.** Both harnesses auto-compact, so a session at 95% context keeps
+working — it summarises and continues. `overseer usage` therefore prints context labelled
+*informational, never a fault*, it is not a `fleet status` state, and it never raises a warning.
+
+**Account quota is the one that stops work.** At 100% of a usage window the API stops answering and
+nothing inside the turn helps until it resets. `usage` flags a window at `OVERSEER_QUOTA_WARN`
+(default 90%), and `chat`/`send`/`wait` print a one-line stderr warning past that threshold.
+
+### The turn that dies on quota
+
+Claude records the refusal as an ordinary **terminal assistant message** —
+`isApiErrorMessage: true`, `apiErrorStatus`, `model: "<synthetic>"`, `stop_reason: "stop_sequence"`,
+with the error text in a normal text block. Every reader keyed on "stop_reason present and not
+tool_use" therefore counts it as a completed turn and hands `API Error: …` back **as the answer**.
+That is what overseer did before 0.38.0.
+
+The fix is a fourth reader on the harness seam, `_h_last_error`. When the record that ended the last
+turn is an API error, `chat`/`wait` fail with the error instead of printing it as a reply — **exit
+code 5** for a usage limit, with "do not resend until it resets"; exit 1 for a transient server error
+(a 529 overload), which *is* worth resending. `read` marks the reply `(NO REPLY — the turn ended in an
+API error)` and `fleet status` shows `api-error` rather than `idle`. Exit 5 is the only distinguished
+code; every other failure keeps exiting 1, because retry-after-reset is the one branch a dispatcher
+must take differently.
+
+Codex writes no such record — `EventMsg::Error` is not in its rollout persistence whitelist, so the
+turn simply completes with an empty reply. The equivalent verdict comes from the rollout's own
+`rate_limits.rate_limit_reached_type`, gated on that empty reply so a limit already hit does not
+re-flag turns that later succeed.
+
+### Why the Claude collector is a statusline
+
+Claude Code publishes `rate_limits` (5-hour and 7-day windows, `used_percentage` + `resets_at`) to
+**statusline scripts only**. Measured, not assumed: it is absent from the `Stop` and
+`UserPromptSubmit` hook payloads, absent from the transcript, and `~/.claude.json`'s
+`cachedUsageUtilization` is refreshed only when `/usage` is opened (four days stale on the machine
+this was designed on). The statusline is the sole live tap, and it carries `context_window` too.
+
+So `usage --install` writes a small collector and points `statusLine` at it. Three consequences shape
+the design:
+
+- **It chains.** Whatever statusline was configured is preserved and run, so installing the collector
+  never costs the user their status bar. `CLAUDE_PROJECT_DIR` is re-exported from the payload's
+  `workspace.project_dir` so a chained command using it still resolves.
+- **It is self-contained, not an exec into the plugin.** Plugin install paths are version-stamped
+  (`…/overseer/0.37.2`), so a settings entry pointing into one breaks on every update. The stub writes
+  the harness's *own* field names verbatim, so there is no format of ours to drift.
+- **Scope is explicit.** A project `.claude/settings.json` overrides the user file, so `--install`
+  detects that it was shadowed and says to rerun `--install --here`, which writes the git-ignored
+  `.claude/settings.local.json`.
+
+A backend with no subscription window at all — Bedrock, Vertex, a raw API key, a proxy — reports no
+`rate_limits`. That is a normal steady state, so it prints `quota n/a` and never warns; only a missing
+*sample* is treated as "not wired yet".
+
+Windows is deliberately out of scope for the *pull*: a collector there would need a PowerShell peer,
+and quota is per-account, so a Windows worker signed in to the same account is already covered by
+reading it on the controller. The *push* half needs nothing extra — `win read`/`win chat` run the same
+transcript seam, so a quota-killed turn on a Windows broker reports identically.

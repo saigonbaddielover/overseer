@@ -1,0 +1,4 @@
+{"type":"event_msg","payload":{"type":"user_message","message":"do the thing"}}
+{"type":"event_msg","payload":{"type":"task_started"}}
+{"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":168569},"model_context_window":258400},"rate_limits":{"limit_id":"codex","primary":{"used_percent":100.0,"window_minutes":10080,"resets_at":4102444800},"secondary":null,"plan_type":"plus","rate_limit_reached_type":"rate_limit_reached"}}}
+{"type":"event_msg","payload":{"type":"task_complete","last_agent_message":null}}

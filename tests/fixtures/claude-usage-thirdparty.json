@@ -1,0 +1,1 @@
+{"session_id":"99999999-8888-7777-6666-555555555555","transcript_path":"/home/user/.claude/projects/-tmp/99999999.jsonl","cwd":"/tmp","model":{"id":"claude-opus-5","display_name":"Opus 5"},"rate_limits":null,"context_window":{"total_input_tokens":12000,"total_output_tokens":40,"context_window_size":200000,"used_percentage":6,"remaining_percentage":94},"sampled_at":1785000000}

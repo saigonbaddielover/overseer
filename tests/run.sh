@@ -580,6 +580,65 @@ eq "PR template requires the Windows payload run" "yes" "$(_has "$PRTPL" 'tests/
 eq "README walkthrough shows the broker lifecycle" "yes" "$(_hasre "$README" 'overseer win .* stop')"
 eq "SKILL walkthrough shows the broker lifecycle" "yes" "$(_hasre "$SKILL" 'overseer win .* stop')"
 
+AE="$FIX/claude-api-error.jsonl"
+eq "claude: a synthetic API-error record still ENDS the turn"   "1" "$(_turn_count "$AE")"
+eq "claude: the API error is reported, not handed back as a reply" \
+   "429	API Error: Claude usage limit reached. Your limit will reset at 3pm." "$(_last_api_error "$AE")"
+eq "claude: a normal turn reports no API error"                 ""  "$(_last_api_error "$C")"
+eq "claude: last_reply alone would leak the error text as an answer" "yes" \
+   "$(case "$(_last_reply "$AE")" in *'API Error'*) echo yes ;; *) echo no ;; esac)"
+
+CQ="$FIX/codex-quota.jsonl"
+eq "codex: a turn stopped by a usage limit is reported"         "429	codex stopped on a usage limit (rate_limit_reached)" "$(_cx_last_api_error "$CQ")"
+eq "codex: a turn that produced a reply is not a quota failure" ""  "$(_cx_last_api_error "$FIX/codex-turn.jsonl")"
+eq "codex: the rate-limit snapshot is the newest one"           "100.0" "$(_cx_rate_limits "$CQ" | jq -r '.primary.used_percent')"
+eq "harness seam dispatches the error read"                     "429	codex stopped on a usage limit (rate_limit_reached)" "$(_h_last_error codex "$CQ")"
+
+# shellcheck disable=SC2034
+QUOTA_WARN=90
+UF="$FIX/claude-usage.json"
+eq "usage: claude rows carry both windows and the context row" \
+   $'5h\t8\t4102444800\t\n7d\t97\t4102531200\t\ncontext\t4\t0\t37324/1000000 tokens' "$(_usage_rows_claude "$UF")"
+eq "usage: a third-party backend reports no quota window, only context" \
+   $'context\t6\t0\t12000/200000 tokens' "$(_usage_rows_claude "$FIX/claude-usage-thirdparty.json")"
+eq "usage: no quota window prints n/a, not an error" "yes" \
+   "$(case "$(_usage_report claude '' "$FIX/claude-usage-thirdparty.json" 0)" in *'quota   n/a'*) echo yes ;; *) echo no ;; esac)"
+eq "usage: codex rows humanise the rolling window" \
+   $'7d\t100.0\t4102444800\t\ncontext\t65\t0\t168569/258400 tokens' "$(_usage_rows_codex "$CQ")"
+eq "usage: the context row is never flagged as a fault" "yes" \
+   "$(case "$(_usage_report claude '' "$UF" 0)" in *'context'*'never a fault'*) echo yes ;; *) echo no ;; esac)"
+eq "usage: a window at/over the threshold is flagged" "yes" \
+   "$(case "$(_usage_report claude '' "$UF" 0)" in *'7d'*'AT/NEAR THE LIMIT'*) echo yes ;; *) echo no ;; esac)"
+eq "usage: a window under the threshold is not flagged" "no" \
+   "$(case "$(_usage_report claude '' "$UF" 0 | grep 'quota 5h')" in *'AT/NEAR'*) echo yes ;; *) echo no ;; esac)"
+eq "usage: --json exposes quota separately from context" "97" \
+   "$(_usage_report claude '' "$UF" 1 | jq -r '.quota[] | select(.window=="7d") | .used_percent')"
+eq "usage: --json keeps context out of the quota array" "context" \
+   "$(_usage_report claude '' "$UF" 1 | jq -r '.context.window')"
+eq "pct threshold: 89 is under 90"  ""    "$(_pct_bad 89 && echo bad)"
+eq "pct threshold: 90 is at the limit" "bad" "$(_pct_bad 90 && echo bad)"
+eq "pct threshold: a float percent still compares" "bad" "$(_pct_bad 99.5 && echo bad)"
+eq "pct threshold: a missing percent is not a breach" "" "$(_pct_bad '' && echo bad)"
+
+_rc_err() { ( _die() { exit 9; }; _die_code() { exit "$1"; }; _report_error_text "$1" tgt >/dev/null 2>&1 ); printf '%s' "$?"; }
+eq "a usage-limit turn exits 5"                  "5" "$(_rc_err "$(printf '429\tAPI Error: Claude usage limit reached. Your limit will reset at 3pm.')")"
+eq "a codex usage limit exits 5 too"             "5" "$(_rc_err "$(_cx_last_api_error "$CQ")")"
+eq "a transient overload exits 9 (plain _die)"   "9" "$(_rc_err "$(printf '529\tAPI Error: 529 Overloaded. Try again in a moment.')")"
+eq "no error at all neither dies nor exits 5"    "1" "$(_rc_err '')"
+eq "the seam+reporter agree on the fixture"      "5" "$(_rc_err "$(_h_last_error claude "$AE")")"
+
+_quotaw() { OVERSEER_QUOTA_WARN="$1" bash "$ENTRY" --help >/dev/null 2>&1 && echo ok || echo rejected; }
+for good in 1 50 90 100; do
+  eq "quota warn '$good' is accepted" "ok" "$(_quotaw "$good")"
+done
+eq "quota warn empty falls back to the default" "ok" "$(_quotaw '')"
+for bad in 0 101 -1 abc 9.5; do
+  eq "quota warn '$bad' is rejected" "rejected" "$(_quotaw "$bad")"
+done
+eq "README documents OVERSEER_QUOTA_WARN" "yes" "$(_has "$README" 'OVERSEER_QUOTA_WARN')"
+eq "README explains that context auto-compacts and quota is the real limit" "yes" "$(_hasre "$README" 'auto-compact')"
+eq "the quota exit code is documented in help" "yes" "$(bash "$ENTRY" --help 2>/dev/null | grep -q 'EXIT CODE 5' && echo yes || echo no)"
+
 _poll() { OVERSEER_POLL_INTERVAL="$1" bash "$ENTRY" --help >/dev/null 2>&1 && echo ok || echo rejected; }
 for good in 0.25 1 1.0 .5 2.5; do
   eq "poll interval '$good' is accepted" "ok" "$(_poll "$good")"
