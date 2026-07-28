@@ -463,3 +463,52 @@ Windows is deliberately out of scope for the *pull*: a collector there would nee
 and quota is per-account, so a Windows worker signed in to the same account is already covered by
 reading it on the controller. The *push* half needs nothing extra — `win read`/`win chat` run the same
 transcript seam, so a quota-killed turn on a Windows broker reports identically.
+
+## ADR-0009 — Read the account quota from the API, not by installing a statusline (supersedes ADR-0008's collector)
+
+ADR-0008 shipped the Claude quota collector as a **statusline** overseer installs into the user's
+`settings.json`. The context/quota split and the API-error seam it describes stand; the collector does
+not, and 0.39.0 replaces it.
+
+Why it was wrong, in the order it became obvious:
+
+1. **It mutates the thing overseer is supposed to only observe.** overseer's whole design is to read
+   another agent's state from outside without changing it. Writing `statusLine` into the user's Claude
+   config is the opposite of that, and it is not what "a command that reports quota" needs to be.
+2. **Settings precedence made it unreliable.** A project `.claude/settings.json` overrides the user
+   file, so on a machine with per-project statuslines the collector silently collected nothing in
+   every project but the one it was installed into. The `--install --here` escape hatch turned a
+   one-time setup into a per-repository chore.
+3. **It only worked where a session happened to be rendering.** No open Claude in that project, no
+   sample.
+
+The replacement is a plain read: `GET https://api.anthropic.com/api/oauth/usage`, authenticated with
+the OAuth access token Claude Code already keeps in `$CLAUDE_HOME/.credentials.json` — the same call
+`/usage` makes (`fetchUtilization: GET /api/oauth/usage` in the CLI bundle). It needs no install, no
+config write, and no per-project anything; it works over `on <host> usage`; and its response is
+**richer** than the statusline payload — every window as a `limits[]` entry with `kind`, `percent`,
+`resets_at`, per-model `scope`, and a server-computed `severity` that overseer flags on ahead of its
+own `OVERSEER_QUOTA_WARN` threshold.
+
+What it costs, and how each cost is bounded:
+
+- **overseer now reads a credential.** The token goes only to the service that issued it, is passed to
+  `curl` on stdin rather than argv so it never appears in `ps`, and is never logged or cached — only
+  the usage response is, at mode 600 under `${XDG_CACHE_HOME:-~/.cache}/overseer/`, bounded by
+  `OVERSEER_QUOTA_TTL` so the `chat`/`send`/`wait` warning never adds a request per command. `usage`
+  itself always fetches live. Documented in SECURITY.md.
+- **overseer cannot refresh an expired token** — that needs the refresh flow, which is Claude Code's
+  job. The token rotates roughly hourly, so an expired one is a normal state and gets its own message
+  ("run any claude session once to renew it") rather than a generic failure.
+- **The endpoint is undocumented.** So is every on-disk layout overseer reads; the house answer
+  applies — `doctor` probes it and reports, and a failure degrades to `quota n/a` rather than
+  breaking a command.
+
+**Context is the one thing lost.** `context_window_size` came from the statusline payload and is in no
+transcript, so Claude's context is now reported as a plain token count instead of a percentage. That
+is an acceptable trade: context is the number this whole design says *not* to act on. Codex keeps its
+percentage because its rollout carries `model_context_window`.
+
+An account with no OAuth credentials at all — a third-party backend, Bedrock/Vertex/an API key/a
+proxy — is detected by that absence and reported as `quota n/a`, which is a cleaner signal than the
+statusline route's "no `rate_limits` field" ever was.

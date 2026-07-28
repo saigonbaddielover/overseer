@@ -25,6 +25,9 @@ _uint "$DEFAULT_TIMEOUT"
 QUOTA_WARN="${OVERSEER_QUOTA_WARN:-90}"
 _uint "$QUOTA_WARN"
 { [ "$QUOTA_WARN" -ge 1 ] && [ "$QUOTA_WARN" -le 100 ]; } || _die "OVERSEER_QUOTA_WARN must be a percentage between 1 and 100, got: '$QUOTA_WARN'"
+QUOTA_TTL="${OVERSEER_QUOTA_TTL:-300}"
+_uint "$QUOTA_TTL"
+[ "$QUOTA_TTL" -ge 1 ] || _die "OVERSEER_QUOTA_TTL must be a whole number of seconds >= 1, got: '$QUOTA_TTL'"
 if [ "${BASH_VERSINFO[0]:-0}" -lt 4 ] || { [ "${BASH_VERSINFO[0]}" -eq 4 ] && [ "${BASH_VERSINFO[1]:-0}" -lt 1 ]; }; then
   _die "needs bash >= 4.1 (found ${BASH_VERSION:-unknown}); on macOS install a newer bash (e.g. Homebrew) and run overseer under it"
 fi
@@ -86,8 +89,8 @@ main() {
       printf '  menu  <t> <item> [nav-key] any pane: navigate a tab/menu until <item> is highlighted (default key Right; codex popups are vertical -> pass Down)\n'
       printf '  sh    <t> <command> [timeout]        shell pane: run one line, wait, print output+exit\n'
       printf '  keys  <t> <key>...         raw keys to answer prompts/menus (Enter Escape y Up C-c ...)\n'
-      printf '  usage [--json] [t]         ACCOUNT quota (%% used per window + reset) and context %%; no target = this machine. context is informational (it auto-compacts) — quota is the one that stops work\n'
-      printf '        --install / --uninstall   wire (or remove) the claude collector: claude reports rate_limits only to a statusline, so overseer installs one that chains yours\n'
+      printf '  usage [--json] [t]         ACCOUNT quota (%% used per window + reset) and context tokens; no target = this machine. context is informational (it auto-compacts) — quota is the one that stops work\n'
+      printf '        claude: read live from https://api.anthropic.com/api/oauth/usage with the OAuth token in $CLAUDE_HOME/.credentials.json (needs curl); codex: from its own rollout. Nothing is installed and no claude config is touched\n'
       printf '        a turn killed by a usage limit is reported by chat/wait as an error with EXIT CODE 5, never as a reply; no quota window at all is normal on a third-party backend\n'
       printf '  doctor [--live]            preflight: Linux/proc, tmux, jq, session state; --live also drives a throwaway pane\n'
       printf '  deploy <host>              copy overseer to ~/.overseer on a remote ssh host (once, before "on")\n'

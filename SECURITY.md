@@ -18,6 +18,30 @@ SIGHUPping its child. `stop` is destructive — run it only when asked, prefer `
 agent's TUI, and note it refuses to kill the session (or, for a `%N` target, the pane) overseer itself
 is running in.
 
+## Reading the account quota (`usage`)
+
+`usage` is the one command that talks to a network service and the one that reads a credential.
+Claude publishes account quota only over its API, so overseer reads the OAuth **access token** from
+`$CLAUDE_HOME/.credentials.json` (default `~/.claude/.credentials.json`, the file Claude Code already
+keeps at mode 600) and makes a single read-only `GET https://api.anthropic.com/api/oauth/usage`.
+
+The rules it holds to:
+
+- The token is sent **only to `api.anthropic.com`**, the service that issued it. There is no
+  third-party endpoint, no telemetry, and no configurable base URL that could redirect it.
+- It is handed to `curl` on **stdin** (`curl --config -`), never on the command line, so it is not
+  visible in `ps` to other users on the machine.
+- It is **never written anywhere** — not logged, not echoed, not cached. Only the *response* (usage
+  percentages and reset times, no credential) is cached, under
+  `${XDG_CACHE_HOME:-~/.cache}/overseer/quota-claude.json` at mode 600, to bound how often
+  `chat`/`send`/`wait` refetch for their warning line.
+- overseer **never writes to the credentials file** and cannot refresh an expired token; it reports
+  the expiry and stops.
+- No other command reads it. If you do not run `usage` — and do not let `chat`/`send`/`wait` emit
+  their quota warning — the file is never opened.
+
+`usage` writes no Claude configuration. It installs nothing, and never modifies `settings.json`.
+
 ## Windows targets (the `win <host> <verb>` commands)
 
 These are remote execution on somebody's live desktop and deserve the same care as `sh`:

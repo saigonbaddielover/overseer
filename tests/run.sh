@@ -596,29 +596,47 @@ eq "harness seam dispatches the error read"                     "429	codex stopp
 
 # shellcheck disable=SC2034
 QUOTA_WARN=90
-UF="$FIX/claude-usage.json"
-eq "usage: claude rows carry both windows and the context row" \
-   $'5h\t8\t4102444800\t\n7d\t97\t4102531200\t\ncontext\t4\t0\t37324/1000000 tokens' "$(_usage_rows_claude "$UF")"
-eq "usage: a third-party backend reports no quota window, only context" \
-   $'context\t6\t0\t12000/200000 tokens' "$(_usage_rows_claude "$FIX/claude-usage-thirdparty.json")"
-eq "usage: no quota window prints n/a, not an error" "yes" \
-   "$(case "$(_usage_report claude '' "$FIX/claude-usage-thirdparty.json" 0)" in *'quota   n/a'*) echo yes ;; *) echo no ;; esac)"
-eq "usage: codex rows humanise the rolling window" \
-   $'7d\t100.0\t4102444800\t\ncontext\t65\t0\t168569/258400 tokens' "$(_usage_rows_codex "$CQ")"
-eq "usage: the context row is never flagged as a fault" "yes" \
-   "$(case "$(_usage_report claude '' "$UF" 0)" in *'context'*'never a fault'*) echo yes ;; *) echo no ;; esac)"
-eq "usage: a window at/over the threshold is flagged" "yes" \
-   "$(case "$(_usage_report claude '' "$UF" 0)" in *'7d'*'AT/NEAR THE LIMIT'*) echo yes ;; *) echo no ;; esac)"
-eq "usage: a window under the threshold is not flagged" "no" \
-   "$(case "$(_usage_report claude '' "$UF" 0 | grep 'quota 5h')" in *'AT/NEAR'*) echo yes ;; *) echo no ;; esac)"
-eq "usage: --json exposes quota separately from context" "97" \
-   "$(_usage_report claude '' "$UF" 1 | jq -r '.quota[] | select(.window=="7d") | .used_percent')"
-eq "usage: --json keeps context out of the quota array" "context" \
-   "$(_usage_report claude '' "$UF" 1 | jq -r '.context.window')"
+QAPI=$(cat "$FIX/claude-quota-api.json")
+eq "usage: claude rows come from limits[], one per window, severity carried" \
+   $'session\t18\t4102484400\tnormal\nweekly_all\t99\t4102603200\tcritical\nweekly_scoped:Fable\t16\t4102603200\tnormal' \
+   "$(_usage_rows_claude "$QAPI" | _rows_epoch)"
+eq "usage: a scoped window keeps the model it applies to" "weekly_scoped:Fable" \
+   "$(_usage_rows_claude "$QAPI" | sed -n '3p' | cut -f1)"
+eq "usage: an empty body yields no rows (nothing to report, not a crash)" "" "$(_usage_rows_claude '')"
+eq "usage: codex rows humanise the rolling window" $'7d\t100.0\t4102444800\tnormal' "$(_usage_rows_codex "$CQ")"
+eq "usage: context is read apart from quota, never mixed in" "168569/258400" "$(_ctx_tokens codex "$CQ")"
+eq "usage: the claude context read is a plain token count" "0" "$(_ctx_tokens claude "$C")"
+
+CROWS=$(_usage_rows_claude "$QAPI" | _rows_epoch)
+eq "usage: the server severity flags a window even under the threshold" "weekly_all	99" "$(_quota_breached "$CROWS")"
+eq "usage: a normal window under the threshold is not a breach" "" \
+   "$(_quota_breached "$(printf 'session\t18\t0\tnormal\n')" || true)"
+eq "usage: a normal window at the threshold is a breach"  "session	90" \
+   "$(_quota_breached "$(printf 'session\t90\t0\tnormal\n')")"
+eq "usage: a flagged window is marked in the printed row" "yes" \
+   "$(case "$(_quota_rows_print "$CROWS")" in *'weekly_all'*'<-- CRITICAL'*) echo yes ;; *) echo no ;; esac)"
+eq "usage: an unflagged window prints without a marker" "no" \
+   "$(case "$(_quota_rows_print "$CROWS" | grep 'quota session')" in *'<--'*) echo yes ;; *) echo no ;; esac)"
+eq "usage: every window prints its reset time" "3" "$(_quota_rows_print "$CROWS" | grep -c 'resets in')"
+
+eq "epoch: an ISO8601 reset converts"          "4102484400" "$(_epoch_of '2100-01-01T11:00:00.316052+00:00')"
+eq "epoch: a unix reset passes through"        "1785819010" "$(_epoch_of 1785819010)"
+eq "epoch: an absent reset is zero"            "0"          "$(_epoch_of '')"
+eq "epoch: an unparseable reset is zero"       "0"          "$(_epoch_of 'not a date')"
 eq "pct threshold: 89 is under 90"  ""    "$(_pct_bad 89 && echo bad)"
 eq "pct threshold: 90 is at the limit" "bad" "$(_pct_bad 90 && echo bad)"
 eq "pct threshold: a float percent still compares" "bad" "$(_pct_bad 99.5 && echo bad)"
 eq "pct threshold: a missing percent is not a breach" "" "$(_pct_bad '' && echo bad)"
+eq "quota unavailable: no credentials reads as a third-party backend" "yes" \
+   "$(case "$(_quota_why 2)" in *'third-party backend'*) echo yes ;; *) echo no ;; esac)"
+eq "quota unavailable: an expired token says overseer cannot refresh it" "yes" \
+   "$(case "$(_quota_why 3)" in *'cannot refresh'*) echo yes ;; *) echo no ;; esac)"
+eq "quota unavailable: anything else names the endpoint" "yes" \
+   "$(case "$(_quota_why 7)" in *'/api/oauth/usage'*) echo yes ;; *) echo no ;; esac)"
+eq "quota: the cache lives outside CLAUDE_HOME" "no" \
+   "$(case "$(_quota_cache)" in "$CLAUDE_HOME"*) echo yes ;; *) echo no ;; esac)"
+eq "quota: the token is read from the claude credentials file" "yes" \
+   "$(case "$(_creds_file)" in *'/.credentials.json') echo yes ;; *) echo no ;; esac)"
 
 _rc_err() { ( _die() { exit 9; }; _die_code() { exit "$1"; }; _report_error_text "$1" tgt >/dev/null 2>&1 ); printf '%s' "$?"; }
 eq "a usage-limit turn exits 5"                  "5" "$(_rc_err "$(printf '429\tAPI Error: Claude usage limit reached. Your limit will reset at 3pm.')")"
@@ -635,7 +653,19 @@ eq "quota warn empty falls back to the default" "ok" "$(_quotaw '')"
 for bad in 0 101 -1 abc 9.5; do
   eq "quota warn '$bad' is rejected" "rejected" "$(_quotaw "$bad")"
 done
+_quotattl() { OVERSEER_QUOTA_TTL="$1" bash "$ENTRY" --help >/dev/null 2>&1 && echo ok || echo rejected; }
+for good in 1 60 300 86400; do
+  eq "quota ttl '$good' is accepted" "ok" "$(_quotattl "$good")"
+done
+eq "quota ttl empty falls back to the default" "ok" "$(_quotattl '')"
+for bad in 0 -1 abc 1.5; do
+  eq "quota ttl '$bad' is rejected" "rejected" "$(_quotattl "$bad")"
+done
 eq "README documents OVERSEER_QUOTA_WARN" "yes" "$(_has "$README" 'OVERSEER_QUOTA_WARN')"
+eq "README documents OVERSEER_QUOTA_TTL" "yes" "$(_has "$README" 'OVERSEER_QUOTA_TTL')"
+eq "README names the endpoint usage reads" "yes" "$(_has "$README" '/api/oauth/usage')"
+eq "SECURITY documents the credentials read" "yes" "$(_has "$SECDOC" '.credentials.json')"
+eq "help says no claude config is touched" "yes" "$(bash "$ENTRY" --help 2>/dev/null | grep -q 'no claude config is touched' && echo yes || echo no)"
 eq "README explains that context auto-compacts and quota is the real limit" "yes" "$(_hasre "$README" 'auto-compact')"
 eq "the quota exit code is documented in help" "yes" "$(bash "$ENTRY" --help 2>/dev/null | grep -q 'EXIT CODE 5' && echo yes || echo no)"
 
