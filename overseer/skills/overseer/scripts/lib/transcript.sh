@@ -50,6 +50,13 @@ _answered() {
       then (if .armed then .done=true else . end)
     else . end) | .done' "$1" 2>/dev/null)" = true ]
 }
+_last_api_error() {
+  jq -rn 'last(inputs | select(.type=="assistant")
+      | select((.message.stop_reason // "") != "" and (.message.stop_reason // "") != "tool_use")
+      | { e: (.isApiErrorMessage == true), s: (.apiErrorStatus // 0),
+          t: ((.message.content // []) | map(select(.type=="text") | .text) | join("\n")) })
+    | if .e then "\(.s)\t\(.t)" else "" end' "$1" 2>/dev/null
+}
 _sid_from_jsonl() { jq -r 'select(.sessionId != null and .sessionId != "") | .sessionId' "$1" 2>/dev/null | head -1; }
 # ---- Codex rollout readers (~/.codex/sessions/**/rollout-*.jsonl) ----------
 # a Codex turn is an `event_msg` task_started ... task_complete pair; task_complete even carries the
@@ -95,6 +102,19 @@ _cx_last_prompt() {
   fi
   printf '%s' "$p"
 }
+_cx_rate_limits() {
+  jq -cn 'last(inputs | select(.type=="event_msg" and .payload.type=="token_count") | .payload.rate_limits // empty) // {}' "$1" 2>/dev/null
+}
+_cx_token_info() {
+  jq -cn 'last(inputs | select(.type=="event_msg" and .payload.type=="token_count") | .payload.info // empty) // {}' "$1" 2>/dev/null
+}
+_cx_last_api_error() {
+  local reached
+  reached=$(_cx_rate_limits "$1" | jq -r '.rate_limit_reached_type // empty' 2>/dev/null)
+  [ -n "$reached" ] || return 0
+  [ -n "$(_cx_last_reply "$1")" ] && return 0
+  printf '429\tcodex stopped on a usage limit (%s)' "$reached"
+}
 # ---- harness-dispatched reads (kind, transcript_path) ----------------------
 _h_turn_count() { case "$1" in claude) _turn_count "$2" ;; codex) _cx_turn_count "$2" ;; esac; }
 _h_is_busy()    { case "$1" in claude) _is_busy "$2" ;;    codex) _cx_is_busy "$2" ;;    esac; }
@@ -103,6 +123,7 @@ _h_last_reply() { case "$1" in claude) _last_reply "$2" ;; codex) _cx_last_reply
 _h_reply_for()  { case "$1" in claude) _reply_for_prompt "$2" "$3" ;; codex) _cx_reply_for_prompt "$2" "$3" ;; esac; }
 _h_answered()   { case "$1" in claude) _answered "$2" "$3" ;; codex) _cx_answered "$2" "$3" ;; esac; }
 _h_last_prompt(){ case "$1" in claude) _last_prompt "$2" ;; codex) _cx_last_prompt "$2" ;; esac; }
+_h_last_error() { case "$1" in claude) _last_api_error "$2" ;; codex) _cx_last_api_error "$2" ;; esac; }
 _file_sig() { stat -c '%Y:%s' "$1" 2>/dev/null || true; }
 _marker_since() {
   local f="$CLAUDE_HOME/$1/$2" m

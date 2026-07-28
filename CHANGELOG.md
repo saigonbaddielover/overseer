@@ -5,6 +5,38 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.38.0] - 2026-07-28
+
+### Added
+
+- **`usage [--json] [target]` — the account quota an overseeing agent should actually watch.** Prints
+  each usage window (`5h`/`7d` for Claude, the rolling window for Codex) with its spend and reset time,
+  and — separately, labelled *informational, never a fault* — the session's context fill. No target
+  reads this machine's account; a target reads that pane's session. Flags a window at
+  `OVERSEER_QUOTA_WARN` (default 90), and `chat`/`send`/`wait` print the same warning to stderr past
+  that threshold. A backend with no subscription window (Bedrock/Vertex/API key/proxy) reports
+  `quota n/a` — a normal state, not an error.
+- **`usage --install` / `--uninstall` wire the Claude collector.** Claude Code publishes `rate_limits`
+  only to a statusline script — it is in no hook payload, not in the transcript, and `~/.claude.json`'s
+  `cachedUsageUtilization` only refreshes when `/usage` is opened. So the collector is a statusline that
+  **chains whatever statusline was already configured**, and is self-contained rather than an exec into
+  the version-stamped plugin path. `--install --here` handles a project `statusLine` overriding the user
+  one (the installer detects the shadowing and says so). Codex needs none of it — it already writes
+  `rate_limits` into every rollout. `doctor` reports whether the collector is wired.
+- `OVERSEER_QUOTA_WARN` (default `90`, validated at startup like the other tunables).
+
+### Fixed
+
+- **A turn killed by a usage limit was handed back as the agent's answer.** Claude records an API
+  refusal as an ordinary terminal assistant message (`isApiErrorMessage`, `model: "<synthetic>"`,
+  `stop_reason: "stop_sequence"`), so every reader keyed on "stop_reason present and not tool_use"
+  counted it as a completed turn and `chat` printed `API Error: …` as the reply. A new `_h_last_error`
+  seam catches it: `chat`/`wait` now exit **5** for a usage limit (with "do not resend until it
+  resets") and 1 for a transient server error, `read` marks it `(NO REPLY — the turn ended in an API
+  error)`, and `fleet status` shows `api-error` instead of `idle`. Codex persists no error event, so
+  the same verdict comes from its rollout's `rate_limits.rate_limit_reached_type`, gated on an empty
+  reply. `win read`/`win chat` share the seam and report identically.
+
 ## [0.37.2] - 2026-07-27
 
 ### Fixed

@@ -11,6 +11,7 @@ POLL_INTERVAL="${OVERSEER_POLL_INTERVAL:-0.25}"
 DEFAULT_TIMEOUT="${OVERSEER_TIMEOUT:-600}"
 
 _die() { printf 'overseer: %s\n' "$1" >&2; exit 1; }
+_die_code() { printf 'overseer: %s\n' "$2" >&2; exit "$1"; }
 _need() { command -v "$1" >/dev/null 2>&1 || _die "missing dependency: $1"; }
 _uint() { case "${1:-}" in ''|*[!0-9]*) _die "timeout must be a whole number of seconds, got: '${1:-}'" ;; esac; }
 _nap() { sleep "$POLL_INTERVAL"; }
@@ -21,6 +22,9 @@ case "${POLL_INTERVAL//[.0]/}" in
   '') _die "OVERSEER_POLL_INTERVAL must be a positive number of seconds, got: '$POLL_INTERVAL'" ;;
 esac
 _uint "$DEFAULT_TIMEOUT"
+QUOTA_WARN="${OVERSEER_QUOTA_WARN:-90}"
+_uint "$QUOTA_WARN"
+{ [ "$QUOTA_WARN" -ge 1 ] && [ "$QUOTA_WARN" -le 100 ]; } || _die "OVERSEER_QUOTA_WARN must be a percentage between 1 and 100, got: '$QUOTA_WARN'"
 if [ "${BASH_VERSINFO[0]:-0}" -lt 4 ] || { [ "${BASH_VERSINFO[0]}" -eq 4 ] && [ "${BASH_VERSINFO[1]:-0}" -lt 1 ]; }; then
   _die "needs bash >= 4.1 (found ${BASH_VERSION:-unknown}); on macOS install a newer bash (e.g. Homebrew) and run overseer under it"
 fi
@@ -56,6 +60,7 @@ main() {
     stop) cmd_stop "$@" ;;
     slash) cmd_slash "$@" ;;
     menu) cmd_menu "$@" ;;
+    usage) cmd_usage "$@" ;;
     doctor) cmd_doctor "$@" ;;
     on) cmd_on "$@" ;;
     deploy) cmd_deploy "$@" ;;
@@ -81,6 +86,9 @@ main() {
       printf '  menu  <t> <item> [nav-key] any pane: navigate a tab/menu until <item> is highlighted (default key Right; codex popups are vertical -> pass Down)\n'
       printf '  sh    <t> <command> [timeout]        shell pane: run one line, wait, print output+exit\n'
       printf '  keys  <t> <key>...         raw keys to answer prompts/menus (Enter Escape y Up C-c ...)\n'
+      printf '  usage [--json] [t]         ACCOUNT quota (%% used per window + reset) and context %%; no target = this machine. context is informational (it auto-compacts) — quota is the one that stops work\n'
+      printf '        --install / --uninstall   wire (or remove) the claude collector: claude reports rate_limits only to a statusline, so overseer installs one that chains yours\n'
+      printf '        a turn killed by a usage limit is reported by chat/wait as an error with EXIT CODE 5, never as a reply; no quota window at all is normal on a third-party backend\n'
       printf '  doctor [--live]            preflight: Linux/proc, tmux, jq, session state; --live also drives a throwaway pane\n'
       printf '  deploy <host>              copy overseer to ~/.overseer on a remote ssh host (once, before "on")\n'
       printf '  on    <host> <command> [args]  run any overseer command on a remote ssh host (ControlPersist-reused; e.g. on sandbox chat %%0 hi)\n'
