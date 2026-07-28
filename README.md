@@ -96,7 +96,7 @@ All work goes through one script; the agent calls it as
 | `menu <target> <item> [nav-key]` | **Any pane.** Navigate a tab bar / list until `<item>` is highlighted (verify-driven). Default nav key `Right` suits a Claude tab bar; Codex popups are vertical — pass `Down`. |
 | `sh <target> <command> [timeout]` | **Shell.** Run one command line, wait, print output + exit code. |
 | `keys <target> <key>...` | Send raw tmux keys (`Enter`, `Escape`, `Up`, `C-c`, ...). Any pane. |
-| `usage [--json] [target]` | **Account quota + context.** Print, per harness, how much of each **usage window** is spent (`5h`/`7d` for Claude, the rolling window for Codex) with when it resets — and, separately and clearly labelled, the session's **context** fill. Only quota can stop work: context [auto-compacts](#context-is-not-a-health-signal) and is informational. No target = this machine's account; a target reads that pane's session. `--json` for scripts. Claude reports its quota **only to a statusline**, so the collector must be wired in once with `usage --install` (it chains any statusline you already have; `--install --here` when a project-level `statusLine` overrides the user one, `--uninstall` reverses it). A backend with no subscription window — Bedrock/Vertex/an API key/a proxy — reports `quota n/a`, which is normal, not a failure. |
+| `usage [--json] [target]` | **Account quota + context.** Print every **usage window** the account has, with how much is spent and when it resets — and, separately and clearly labelled, the session's **context** size. Only quota can stop work: context [auto-compacts](#context-is-not-a-health-signal) and is informational. Claude's windows are read **live** from `https://api.anthropic.com/api/oauth/usage` using the OAuth token already in `$CLAUDE_HOME/.credentials.json` (needs `curl`), carrying the server's own `severity` — so a window it calls `critical` is flagged even below `OVERSEER_QUOTA_WARN`. Codex's come from its rollout. **Nothing is installed and no Claude config is touched.** No target = this machine's account; a target adds that pane's context. `--json` for scripts. An account with no subscription window — Bedrock/Vertex/an API key/a proxy, i.e. no OAuth credentials at all — reports `quota n/a`, which is normal, not a failure. |
 | `doctor [--live]` | Preflight: check Linux/`/proc`, `tmux`, `jq`, `codex`, and that Claude/Codex session state is where discovery expects it. `--live` (also plain `live`) additionally drives a throwaway pane through a `sh` round-trip to verify the send/capture path end to end; a failing `--live` check makes `doctor` exit non-zero. |
 | `hosts [--list] [--tailscale] [--os NAME] [-u USER] [-t secs]` | **Remote (SSH), fleet survey.** Print one line per host — `HOST ONLINE OS SSH DRIVE`, where `HOST` is the **effective `user@host`** — so you can see which machines you can actually drive, *and as which user*, before an `on`/`win`. The inventory (ssh targets to probe) comes from `$OVERSEER_HOSTS` if set, else `$XDG_CONFIG_HOME/overseer/hosts`, else the non-wildcard `Host` entries of `~/.ssh/config`; or pass `--tailscale` to enumerate the tailnet directly (`--os windows`/`linux` filters it) for machines you never added to ssh config. **The login user** for a bare host (no `user@`) is resolved from `ssh -G` — so an ssh-config `Host … User fleetuser` block is honoured and shown — or forced with `-u USER` / `$OVERSEER_HOSTS_USER` when it lives nowhere (the common "same user across the whole fleet" case). Each host is probed **live and in parallel**: `SSH` is `ok`/`deny`/`unreach`, `OS` is `linux`/`windows`/`macos`, `DRIVE` is `yes` (Linux with `tmux`+`jq`), `no:tmux`/`no:jq`, or `win*` (a Windows broker target). `ONLINE` is filled from `tailscale status` when the CLI is present. Nothing is stored — reachability is computed each run (a cached health value would just be stale). `--list` prints the inventory without probing; `-t` sets the per-host ssh connect timeout (default 6s). |
 | `provision [--dry-run] <host>` | **Remote (SSH).** Install the missing Linux **drive** dependencies (`tmux` + `jq`) on a reachable host — the fix for a `hosts` `DRIVE=no:tmux`/`no:jq`. Detects the package manager (`apt`/`dnf`/`yum`/`pacman`/`zypper`/`apk`), installs only what's absent (idempotent), and needs **root or passwordless `sudo`** on the host (it runs non-interactively). `--dry-run` prints the exact command instead of running it. Linux only, and only the base deps — Claude/Codex agents (and every Windows prerequisite) are still set up by hand. |
@@ -133,11 +133,12 @@ start` is `start`, `win <host> chat` is `chat`, and so on. (The old fused names 
 | **quit** | Gracefully exit the broker's agent TUI with Ctrl-C (twice for Claude) so it can flush on the way out. The broker **closes with it** if the agent was its only child (as on a `start claude` broker) — `stop` is the force-kill alternative. The Windows peer of `quit`. |
 | **stop** | Stop the broker and its child on the host. The Windows peer of `stop`. |
 
-Three environment variables tune the defaults (all validated at startup, so a bad value fails loudly):
+Four environment variables tune the defaults (all validated at startup, so a bad value fails loudly):
 `OVERSEER_TIMEOUT` (default `600`) is the fallback `[timeout]` seconds for `chat`/`wait`/`sh`,
-`OVERSEER_POLL_INTERVAL` (default `0.25`) is the poll cadence in seconds, and `OVERSEER_QUOTA_WARN`
+`OVERSEER_POLL_INTERVAL` (default `0.25`) is the poll cadence in seconds, `OVERSEER_QUOTA_WARN`
 (default `90`) is the percentage at which `usage` flags a quota window and `chat`/`send`/`wait` print
-a one-line warning to stderr. Two more point overseer at
+a one-line warning to stderr, and `OVERSEER_QUOTA_TTL` (default `300`) is how long that warning may
+reuse a cached quota reading before refetching — `usage` itself always fetches live. Two more point overseer at
 non-default state directories: `CLAUDE_HOME` (default `~/.claude`), used to find Claude's session
 files, transcripts and the hook markers. `CODEX_HOME` (default `~/.codex`) is read only by `doctor` —
 live Codex discovery finds the rollout the running process holds open via `/proc`, so it is unaffected.
@@ -344,13 +345,24 @@ transient server error (a 529 overload) is separated out and exits 1, because th
 resending. Codex has no such record — it simply completes the turn with an empty reply — so the same
 verdict comes from its rollout's `rate_limits.rate_limit_reached_type`.
 
-Reading Claude's quota needs one-time wiring, because Claude Code hands `rate_limits` **only to a
-statusline script** — it is in no hook payload and in no file on disk. `usage --install` writes a
-small collector and points `statusLine` at it, chaining whatever statusline was already configured so
-your own status bar keeps rendering. Settings precedence applies: a project-level `.claude/settings.json`
-overrides the user one, and the installer detects that and tells you to rerun with `--install --here`
-(which writes the git-ignored `.claude/settings.local.json`). Codex needs none of this — it writes
-`rate_limits` into every rollout already.
+Claude's quota is read **live from the same endpoint `/usage` uses** — `GET
+https://api.anthropic.com/api/oauth/usage`, authenticated with the OAuth access token already sitting
+in `$CLAUDE_HOME/.credentials.json`. Nothing is installed, no Claude setting is written, and it works
+from any directory and over `on <host> usage`. The response carries every window the account has
+(session, weekly, and per-model weekly) with a server-computed `severity`, which overseer trusts
+ahead of its own threshold.
+
+Three consequences worth knowing:
+
+- **overseer reads your Claude credentials file.** The token goes only to `api.anthropic.com`, is
+  passed to `curl` over stdin rather than argv (so it never shows up in `ps`), and is never logged or
+  cached — see [SECURITY.md](SECURITY.md).
+- **overseer cannot refresh an expired token.** Claude Code rotates it roughly hourly; if it has
+  expired, `usage` says so and the fix is to run any Claude session once.
+- **The endpoint is undocumented**, like the on-disk layouts overseer already depends on, so `doctor`
+  probes it and reports rather than assuming.
+
+Codex needs none of this: it writes `rate_limits` into every rollout already.
 
 ## Caveats
 

@@ -601,46 +601,17 @@ _doctor_live() {
   tmux kill-session -t "$sess" 2>/dev/null || true
   return "$rc"
 }
-_usage_dir()      { printf '%s/usage' "$CLAUDE_HOME"; }
-_usage_stub()     { printf '%s/overseer-statusline.sh' "$CLAUDE_HOME"; }
-_usage_settings() { printf '%s/settings.json' "$CLAUDE_HOME"; }
-_usage_newest()   { ls -t "$(_usage_dir)"/*.json 2>/dev/null | head -1; }
-_usage_scopes()   { printf '.claude/settings.local.json\n.claude/settings.json\n%s\n' "$(_usage_settings)"; }
-_usage_effective() {
-  local f c
-  while IFS= read -r f; do
-    [ -f "$f" ] || continue
-    c=$(jq -r '.statusLine.command // empty' "$f" 2>/dev/null || true)
-    [ -n "$c" ] && { printf '%s\t%s' "$f" "$c"; return 0; }
-  done <<< "$(_usage_scopes)"
-  return 1
-}
-_usage_prev_command() {
-  local f c skip="${1:-0}" i=0
-  while IFS= read -r f; do
-    i=$((i + 1)); [ "$i" -le "$skip" ] && continue
-    [ -f "$f" ] || continue
-    c=$(jq -r '.statusLine.command // empty' "$f" 2>/dev/null || true)
-    [ -n "$c" ] || continue
-    case "$c" in "$(_usage_stub)"*) continue ;; esac
-    printf '%s\t%s' "$f" "$c"; return 0
-  done <<< "$(_usage_scopes)"
-  return 1
-}
-_usage_wired() {
-  local e
-  [ -x "$(_usage_stub)" ] || return 1
-  e=$(_usage_effective) || return 1
-  case "${e#*$'\t'}" in "$(_usage_stub)"*) return 0 ;; esac
-  return 1
-}
-_usage_file_for() {
-  local f="$(_usage_dir)/${1:-}.json"
-  [ -n "${1:-}" ] && [ -f "$f" ] && { printf '%s' "$f"; return 0; }
-  return 1
+_quota_cache() { printf '%s/overseer/quota-claude.json' "${XDG_CACHE_HOME:-$HOME/.cache}"; }
+_creds_file()  { printf '%s/.credentials.json' "$CLAUDE_HOME"; }
+_epoch_of() {
+  case "${1:-}" in
+    ''|0) printf '0' ;;
+    *[!0-9]*) date -d "$1" +%s 2>/dev/null || printf '0' ;;
+    *) printf '%s' "$1" ;;
+  esac
 }
 _dur_until() {
-  local s d h m; s=$(( ${1:-0} - $(date +%s) ))
+  local s d h m; s=$(( $(_epoch_of "${1:-0}") - $(date +%s) ))
   [ "$s" -le 0 ] && { printf 'now'; return 0; }
   d=$(( s / 86400 )); h=$(( (s % 86400) / 3600 )); m=$(( (s % 3600) / 60 ))
   if [ "$d" -gt 0 ]; then printf '%dd%dh' "$d" "$h"
@@ -648,71 +619,95 @@ _dur_until() {
   else printf '%dm' "$m"; fi
 }
 _pct_bad() { local p="${1:-0}"; p="${p%%.*}"; case "$p" in ''|*[!0-9]*) return 1 ;; esac; [ "$p" -ge "$QUOTA_WARN" ]; }
+_claude_quota_fetch() {
+  local f exp now
+  f=$(_creds_file)
+  [ -f "$f" ] || return 2
+  exp=$(jq -r '.claudeAiOauth.expiresAt // 0' "$f" 2>/dev/null || echo 0)
+  now=$(date +%s)
+  [ "${exp%%.*}" -gt "$((now * 1000))" ] 2>/dev/null || return 3
+  jq -r '"header = \"Authorization: Bearer \(.claudeAiOauth.accessToken)\""' "$f" 2>/dev/null |
+    curl -sS --fail --max-time 15 --config - \
+      -H 'anthropic-beta: oauth-2025-04-20' -H 'Accept: application/json' \
+      https://api.anthropic.com/api/oauth/usage 2>/dev/null
+}
+_claude_quota_cached() {
+  local c age; c=$(_quota_cache)
+  if [ -f "$c" ]; then
+    age=$(( $(date +%s) - $(stat -c %Y "$c" 2>/dev/null || echo 0) ))
+    [ "$age" -lt "$QUOTA_TTL" ] && { cat "$c"; return 0; }
+  fi
+  local body rc=0; body=$(_claude_quota_fetch) || rc=$?
+  [ "$rc" = 0 ] && [ -n "$body" ] || return "$rc"
+  mkdir -p "$(dirname "$c")" 2>/dev/null || true
+  ( umask 077; printf '%s' "$body" > "$c.$$" ) 2>/dev/null && mv -f "$c.$$" "$c" 2>/dev/null || rm -f "$c.$$" 2>/dev/null
+  printf '%s' "$body"
+}
+_quota_why() {
+  case "${1:-}" in
+    2) printf 'no OAuth credentials in %s — normal on a third-party backend (Bedrock/Vertex/API key/proxy), which has no subscription window' "$(_creds_file)" ;;
+    3) printf 'the OAuth token in %s has expired — overseer cannot refresh it; run any claude session once to renew it' "$(_creds_file)" ;;
+    *) printf 'could not reach https://api.anthropic.com/api/oauth/usage (network, or the endpoint changed)' ;;
+  esac
+}
 _usage_rows_claude() {
-  jq -r '(.rate_limits // {}) as $r
-    | ( if ($r.five_hour // null) != null then "5h\t\($r.five_hour.used_percentage)\t\($r.five_hour.resets_at // 0)\t" else empty end),
-      ( if ($r.seven_day // null) != null then "7d\t\($r.seven_day.used_percentage)\t\($r.seven_day.resets_at // 0)\t" else empty end),
-      ( (.context_window // {}) as $c
-        | if ($c.used_percentage // null) != null
-          then "context\t\($c.used_percentage)\t0\t\($c.total_input_tokens // 0)/\($c.context_window_size // 0) tokens"
-          else empty end )' "$1" 2>/dev/null
+  printf '%s' "$1" | jq -r '(.limits // []) | .[]
+    | ((.kind // "quota") + (if (.scope.model.display_name // "") != "" then ":" + .scope.model.display_name else "" end)) as $l
+    | "\($l)\t\(.percent // 0)\t\(.resets_at // 0)\t\(.severity // "normal")"' 2>/dev/null
 }
 _usage_rows_codex() {
   printf '%s\n%s\n' "$(_cx_rate_limits "$1")" "$(_cx_token_info "$1")" | jq -rn '
     def wlabel(m): if m == null then "quota" elif m % 1440 == 0 then "\(m/1440|floor)d" elif m % 60 == 0 then "\(m/60|floor)h" else "\(m)m" end;
     [inputs] as $x | ($x[0] // {}) as $r | ($x[1] // {}) as $i
-    | ( if ($r.primary // null) != null then "\(wlabel($r.primary.window_minutes))\t\($r.primary.used_percent)\t\($r.primary.resets_at // 0)\t" else empty end),
-      ( if ($r.secondary // null) != null then "\(wlabel($r.secondary.window_minutes))\t\($r.secondary.used_percent)\t\($r.secondary.resets_at // 0)\t" else empty end),
-      ( if (($i.model_context_window // 0) > 0)
-        then "context\t\((($i.last_token_usage.total_tokens // 0) * 100 / $i.model_context_window)|floor)\t0\t\($i.last_token_usage.total_tokens // 0)/\($i.model_context_window) tokens"
-        else empty end )' 2>/dev/null
+    | ( if ($r.primary // null) != null then "\(wlabel($r.primary.window_minutes))\t\($r.primary.used_percent)\t\($r.primary.resets_at // 0)\tnormal" else empty end),
+      ( if ($r.secondary // null) != null then "\(wlabel($r.secondary.window_minutes))\t\($r.secondary.used_percent)\t\($r.secondary.resets_at // 0)\tnormal" else empty end)' 2>/dev/null
 }
-_usage_rows() { case "$1" in claude) _usage_rows_claude "$2" ;; codex) _usage_rows_codex "$2" ;; esac; }
-_usage_report() {
-  local kind="$1" pane="$2" src="$3" json="$4" rows hdr label pct rst detail when q=0
-  rows=$(_usage_rows "$kind" "$src")
-  if [ "$json" = 1 ]; then
-    printf '%s\n' "$rows" | jq -Rn --arg k "$kind" --arg p "$pane" --arg s "$src" \
-      '[inputs | select(length > 0) | split("\t")
-        | {window:.[0], used_percent:((.[1]|tonumber?) // 0), resets_at:((.[2]|tonumber?) // 0), detail:.[3]}]
-       | {harness:$k, pane:$p, source:$s,
-          quota:[.[] | select(.window != "context")],
-          context:((map(select(.window == "context")) | first) // null)}'
-    return 0
-  fi
-  if [ "$kind" = claude ]; then
-    hdr=$(jq -r '"model=\(.model.display_name // .model.id // "?") session=\((.session_id // "????????")[0:8]) sampled=\(((now - (.sampled_at // 0))|floor))s ago"' "$src" 2>/dev/null)
-  else
-    hdr=$(_cx_rate_limits "$src" | jq -r '"plan=\(.plan_type // "?") limit=\(.limit_id // "?")"' 2>/dev/null)
-  fi
-  printf '# %s%s  %s\n' "$kind" "${pane:+ $pane}" "$hdr"
-  while IFS=$'\t' read -r label pct rst detail; do
+_ctx_tokens() {
+  case "$1" in
+    claude) jq -rn 'last(inputs | select(.type=="assistant") | (.message.usage // {})
+              | ((.input_tokens // 0) + (.cache_read_input_tokens // 0) + (.cache_creation_input_tokens // 0))) // 0' "$2" 2>/dev/null ;;
+    codex)  _cx_token_info "$2" | jq -r '"\(.last_token_usage.total_tokens // 0)/\(.model_context_window // 0)"' 2>/dev/null ;;
+  esac
+}
+_rows_epoch() {
+  local a b c d
+  while IFS=$'\t' read -r a b c d; do
+    [ -n "$a" ] || continue
+    printf '%s\t%s\t%s\t%s\n' "$a" "$b" "$(_epoch_of "$c")" "$d"
+  done
+}
+_quota_rows_print() {
+  local rows label pct rst sev when
+  while IFS=$'\t' read -r label pct rst sev; do
     [ -n "$label" ] || continue
-    if [ "$label" = context ]; then
-      printf '  context %5s%%  %s (auto-compacts; informational, never a fault)\n' "${pct%%.*}" "$detail"
-      continue
+    when=''; [ "$(_epoch_of "$rst")" -gt 0 ] && when="resets in $(_dur_until "$rst")"
+    if [ "$sev" != normal ] || _pct_bad "$pct"; then
+      printf '  quota %-20s %5s%%  %-16s <-- %s\n' "$label" "${pct%%.*}" "$when" "$(printf '%s' "${sev}" | tr '[:lower:]' '[:upper:]')"
+    else
+      printf '  quota %-20s %5s%%  %s\n' "$label" "${pct%%.*}" "$when"
     fi
-    q=1; when=''
-    [ "${rst:-0}" -gt 0 ] 2>/dev/null && when="resets in $(_dur_until "$rst")"
-    if _pct_bad "$pct"; then printf '  quota %-7s %5s%%  %s  <-- AT/NEAR THE LIMIT\n' "$label" "${pct%%.*}" "$when"
-    else printf '  quota %-7s %5s%%  %s\n' "$label" "${pct%%.*}" "$when"; fi
-  done <<< "$rows"
-  [ "$q" = 0 ] && printf '  quota   n/a            no subscription window reported — normal on a third-party backend (Bedrock/Vertex/API key/proxy)\n'
-  return 0
+  done <<< "$1"
 }
-_quota_warn() {
-  local kind="$1" src="$2" label pct
-  [ -n "$src" ] && [ -f "$src" ] || return 0
-  while IFS=$'\t' read -r label pct _ _; do
-    { [ -n "$label" ] && [ "$label" != context ] && _pct_bad "$pct"; } &&
-      printf 'overseer: WARNING %s quota %s at %s%% — see: overseer usage\n' "$kind" "$label" "${pct%%.*}" >&2
-  done <<< "$(_usage_rows "$kind" "$src")"
-  return 0
+_quota_breached() {
+  local label pct sev
+  while IFS=$'\t' read -r label pct _ sev; do
+    [ -n "$label" ] || continue
+    { [ "$sev" != normal ] || _pct_bad "$pct"; } && { printf '%s\t%s' "$label" "${pct%%.*}"; return 0; }
+  done <<< "$1"
+  return 1
 }
 _quota_warn_for() {
-  local kind="$1" path="$2" src=''
-  case "$kind" in claude) src=$(_usage_newest) ;; codex) src="$path" ;; esac
-  _quota_warn "$kind" "$src"
+  local kind="$1" path="$2" rows b
+  case "$kind" in
+    claude) command -v curl >/dev/null 2>&1 || return 0
+            rows=$(_usage_rows_claude "$(_claude_quota_cached 2>/dev/null || true)" | _rows_epoch) ;;
+    codex)  { [ -n "$path" ] && [ -f "$path" ]; } || return 0
+            rows=$(_usage_rows_codex "$path" | _rows_epoch) ;;
+  esac
+  [ -n "$rows" ] || return 0
+  b=$(_quota_breached "$rows") || return 0
+  printf 'overseer: WARNING %s quota %s at %s%% — see: overseer usage\n' "$kind" "${b%%$'\t'*}" "${b#*$'\t'}" >&2
+  return 0
 }
 _report_turn_error() {
   local kind="$1" path="$2" target="$3" e
@@ -727,138 +722,74 @@ _report_error_text() {
   case "$st$txt" in
     429*|*[Uu]sage\ limit*|*[Rr]ate\ limit*|*[Qq]uota*|*credit*|*_limit_reached*)
       _die_code 5 "$target hit an API usage limit — the turn ENDED WITH NO REPLY: $txt
-do NOT resend until it resets; check the account: overseer usage $target" ;;
+do NOT resend until it resets; check the account: overseer usage" ;;
   esac
   _die "$target failed with an API error — the turn ENDED WITH NO REPLY: $txt
 usually transient (server-side); resend the same message once it clears: overseer peek $target"
 }
-_usage_hint() {
-  if _usage_wired; then printf 'the collector is wired but has no sample yet: a claude session starts collecting on its next render, so restart the ones already open'
-  else printf 'claude reports its account quota only to a statusline, so overseer has to be wired in once: overseer usage --install'; fi
+_usage_claude() {
+  local pane="$1" path="$2" json="$3" body rc=0 rows t
+  _need curl
+  body=$(_claude_quota_fetch) || rc=$?
+  if [ "$rc" != 0 ]; then
+    [ "$json" = 1 ] && { jq -nc --arg r "$(_quota_why "$rc")" '{harness:"claude", quota:null, unavailable:$r}'; return 0; }
+    printf '# claude%s  account quota\n  quota   n/a            %s\n' "${pane:+ $pane}" "$(_quota_why "$rc")"
+  else
+    mkdir -p "$(dirname "$(_quota_cache)")" 2>/dev/null || true
+    ( umask 077; printf '%s' "$body" > "$(_quota_cache)" ) 2>/dev/null || true
+    rows=$(_usage_rows_claude "$body" | _rows_epoch)
+    if [ "$json" = 1 ]; then
+      printf '%s\n' "$rows" | jq -Rn --arg p "$pane" '{harness:"claude", pane:$p,
+        quota:[inputs | select(length > 0) | split("\t")
+               | {window:.[0], used_percent:((.[1]|tonumber?) // 0), resets_at:((.[2]|tonumber?) // 0), severity:.[3]}]}'
+      return 0
+    fi
+    printf '# claude%s  account quota (live)\n' "${pane:+ $pane}"
+    _quota_rows_print "$rows"
+  fi
+  { [ -n "$path" ] && [ -f "$path" ]; } || return 0
+  t=$(_ctx_tokens claude "$path")
+  printf '  context %16s tokens in this session (auto-compacts; informational, never a fault)\n' "$t"
+}
+_usage_codex() {
+  local pane="$1" path="$2" json="$3" rows t
+  rows=$(_usage_rows_codex "$path" | _rows_epoch); t=$(_ctx_tokens codex "$path")
+  if [ "$json" = 1 ]; then
+    printf '%s\n' "$rows" | jq -Rn --arg p "$pane" --arg t "$t" '{harness:"codex", pane:$p,
+      quota:[inputs | select(length > 0) | split("\t")
+             | {window:.[0], used_percent:((.[1]|tonumber?) // 0), resets_at:((.[2]|tonumber?) // 0), severity:.[3]}],
+      context:$t}'
+    return 0
+  fi
+  printf '# codex%s  %s\n' "${pane:+ $pane}" "$(_cx_rate_limits "$path" | jq -r '"plan=\(.plan_type // "?") limit=\(.limit_id // "?")"' 2>/dev/null)"
+  if [ -n "$rows" ]; then _quota_rows_print "$rows"
+  else printf '  quota   n/a            no subscription window in the rollout — normal on a third-party backend\n'; fi
+  printf '  context %16s tokens (auto-compacts; informational, never a fault)\n' "$t"
 }
 cmd_usage() {
   _need jq
   local json=0
   while :; do case "${1:-}" in
     --json) json=1; shift ;;
-    --install) _usage_install "${2:-}"; return 0 ;;
-    --uninstall) _usage_uninstall "${2:-}"; return 0 ;;
-    -*) _die "usage: overseer usage [--json] [pane|session]   (manage the claude collector: overseer usage --install [--here] | --uninstall [--here]; --here writes ./.claude/settings.local.json when a project statusLine overrides the user one)" ;;
+    -*) _die "usage: overseer usage [--json] [pane|session]   (account quota + context; no target = this machine)" ;;
     *) break ;;
   esac; done
-  local target="${1:-}" ctx pane kind path uf sid any=0
+  local target="${1:-}" ctx pane kind path
   if [ -n "$target" ]; then
     _need tmux
     ctx=$(_target_ctx "$target") || _die "no agent pane (claude/codex) for target: $target (see: overseer list)"
     IFS=$'\t' read -r pane kind path <<< "$ctx"
-    if [ "$kind" = claude ]; then
-      sid=''; { [ -n "$path" ] && [ -f "$path" ]; } && sid=$(_sid_from_jsonl "$path")
-      uf=$(_usage_file_for "$sid") || _die "no quota sample for $pane yet — $(_usage_hint)"
-      _usage_report claude "$pane" "$uf" "$json"
-    else
-      { [ -n "$path" ] && [ -f "$path" ]; } || _die "no rollout for $pane yet (a 0-turn codex has none)"
-      _usage_report codex "$pane" "$path" "$json"
-    fi
+    case "$kind" in
+      claude) _usage_claude "$pane" "$path" "$json" ;;
+      codex)  { [ -n "$path" ] && [ -f "$path" ]; } || _die "no rollout for $pane yet (a 0-turn codex has none)"
+              _usage_codex "$pane" "$path" "$json" ;;
+    esac
     return 0
   fi
-  uf=$(_usage_newest); [ -n "$uf" ] && { _usage_report claude '' "$uf" "$json"; any=1; }
+  _usage_claude '' '' "$json"
   path=$(_newest_with_turns codex 2>/dev/null || true)
-  [ -n "$path" ] && { _usage_report codex '' "$path" "$json"; any=1; }
-  [ "$any" = 1 ] || _die "no quota data on this machine — $(_usage_hint)"
-}
-_usage_write_stub() {
-  local f; f=$(_usage_stub)
-  cat > "$f" <<'EOS'
-#!/usr/bin/env bash
-set -eu
-H="${CLAUDE_HOME:-$HOME/.claude}"
-in=$(cat)
-sid=$(printf '%s' "$in" | jq -r '.session_id // empty' 2>/dev/null || true)
-if [ -n "$sid" ]; then
-  d="$H/usage"
-  mkdir -p "$d" 2>/dev/null || true
-  t=$(mktemp "$d/.tmp.XXXXXX" 2>/dev/null) || t=''
-  if [ -n "$t" ]; then
-    if printf '%s' "$in" | jq -c '{session_id, transcript_path, cwd, model, rate_limits, context_window, sampled_at: now}' >"$t" 2>/dev/null; then
-      mv -f "$t" "$d/$sid.json" 2>/dev/null || rm -f "$t" 2>/dev/null || true
-    else
-      rm -f "$t" 2>/dev/null || true
-    fi
-  fi
-fi
-c="${1:-}"
-if [ -n "$c" ] && [ -s "$c" ]; then
-  CLAUDE_PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(printf '%s' "$in" | jq -r '.workspace.project_dir // .cwd // empty' 2>/dev/null || true)}"
-  export CLAUDE_PROJECT_DIR
-  printf '%s' "$in" | sh -c "$(cat "$c")"
-  exit 0
-fi
-printf '%s' "$in" | jq -r '(.rate_limits // {}) as $r
-  | [ (if ($r.five_hour // null) != null then "5h \($r.five_hour.used_percentage)%" else empty end),
-      (if ($r.seven_day // null) != null then "7d \($r.seven_day.used_percentage)%" else empty end),
-      (if (.context_window.used_percentage // null) != null then "ctx \(.context_window.used_percentage)%" else empty end) ]
-  | join(" · ")' 2>/dev/null || true
-EOS
-  chmod +x "$f"
-}
-_usage_scope_files() {
-  if [ "${1:-0}" = 1 ]; then
-    printf '.claude/settings.local.json\t.claude/overseer-statusline.chain\t${CLAUDE_PROJECT_DIR}/.claude/overseer-statusline.chain\t0'
-  else
-    printf '%s\t%s/overseer-statusline.chain\t%s/overseer-statusline.chain\t2' \
-      "$(_usage_settings)" "$CLAUDE_HOME" "$CLAUDE_HOME"
-  fi
-}
-_usage_install() {
-  local here=0; [ "${1:-}" = --here ] && here=1
-  _need jq
-  local stub s chain cref skip cur tmp eff
-  stub=$(_usage_stub)
-  IFS=$'\t' read -r s chain cref skip <<< "$(_usage_scope_files "$here")"
-  [ "$here" = 1 ] && { mkdir -p .claude 2>/dev/null || _die "could not create ./.claude in $PWD"; }
-  mkdir -p "$(_usage_dir)" 2>/dev/null || _die "could not create $(_usage_dir)"
-  local prev from; prev=$(_usage_prev_command "$skip" || true)
-  from="${prev%%$'\t'*}"; cur=''; [ -n "$prev" ] && cur="${prev#*$'\t'}"
-  _usage_write_stub
-  if [ -n "$cur" ]; then printf '%s' "$cur" > "$chain"; printf '%s' "$from" > "$chain.from"
-  else rm -f "$chain" "$chain.from" 2>/dev/null || true; fi
-  tmp="$s.overseer.$$"
-  if [ -f "$s" ]; then
-    jq --arg c "$stub $cref" '.statusLine = {type:"command", command:$c}' "$s" > "$tmp" 2>/dev/null \
-      || { rm -f "$tmp" 2>/dev/null || true; _die "could not parse $s as JSON — fix it, then rerun"; }
-  else
-    jq -n --arg c "$stub $cref" '{statusLine:{type:"command", command:$c}}' > "$tmp" 2>/dev/null \
-      || { rm -f "$tmp" 2>/dev/null || true; _die "could not write $s"; }
-  fi
-  mv -f "$tmp" "$s" || { rm -f "$tmp" 2>/dev/null || true; _die "could not update $s"; }
-  printf 'quota collector installed\n  statusLine -> %s   (in %s)\n  samples    -> %s/<session_id>.json\n' "$stub" "$s" "$(_usage_dir)"
-  [ -n "$cur" ] && printf '  chained the statusline that was there: %s\n' "$cur"
-  eff=$(_usage_effective || true)
-  if [ -n "$eff" ] && [ "${eff%%$'\t'*}" != "$s" ]; then
-    printf 'BUT %s defines a statusLine too and OVERRIDES what was just written — rerun inside that project: overseer usage --install --here\n' "${eff%%$'\t'*}"
-    return 0
-  fi
-  printf 'a claude session starts collecting on its next render; restart the ones already open, then: overseer usage\n'
-}
-_usage_uninstall() {
-  local here=0; [ "${1:-}" = --here ] && here=1
-  _need jq
-  local s chain cref skip tmp cur='' from=''
-  IFS=$'\t' read -r s chain cref skip <<< "$(_usage_scope_files "$here")"
-  [ -s "$chain" ] && cur=$(cat "$chain")
-  [ -s "$chain.from" ] && from=$(cat "$chain.from")
-  [ "$from" = "$s" ] || cur=''
-  if [ -f "$s" ]; then
-    tmp="$s.overseer.$$"
-    if [ -n "$cur" ]; then jq --arg c "$cur" '.statusLine = {type:"command", command:$c}' "$s" > "$tmp" 2>/dev/null || true
-    else jq 'del(.statusLine)' "$s" > "$tmp" 2>/dev/null || true; fi
-    if [ -s "$tmp" ]; then mv -f "$tmp" "$s" || rm -f "$tmp" 2>/dev/null || true
-    else rm -f "$tmp" 2>/dev/null || true; fi
-  fi
-  rm -f "$chain" "$chain.from" 2>/dev/null || true
-  _usage_wired || rm -f "$(_usage_stub)" 2>/dev/null || true
-  if [ -n "$cur" ]; then printf 'quota collector removed from %s (the statusline it replaced is restored)\n' "$s"
-  else printf 'quota collector removed from %s (samples kept in %s)\n' "$s" "$(_usage_dir)"; fi
+  [ -n "$path" ] && _usage_codex '' "$path" "$json"
+  return 0
 }
 # preflight the runtime: the requirements (Linux/proc, tmux, jq) and — crucially — whether Claude
 # Code's on-disk session state is where discovery expects it. Run this first when a pane "can't be
@@ -885,11 +816,15 @@ cmd_doctor() {
     printf '  [warn] no %s/sessions/*.json — no claude running, OR Claude Code changed its on-disk layout (would break discovery; see README caveats)\n' "$CLAUDE_HOME"
   fi
   _doctor_probe claude || bad=1
-  if _usage_wired; then
-    n=$(ls "$(_usage_dir)"/*.json 2>/dev/null | wc -l)
-    printf '  [ok]   quota collector wired into statusLine (%s session sample(s) in %s)\n' "$n" "$(_usage_dir)"
+  if ! command -v curl >/dev/null 2>&1; then
+    printf '  [warn] curl not found — "overseer usage" cannot read the claude account quota (codex still works)\n'
   else
-    printf '  [warn] quota collector not wired — "overseer usage" cannot read the claude ACCOUNT quota (claude reports it only to a statusline); install: overseer usage --install\n'
+    local qrc=0 qbody; qbody=$(_claude_quota_fetch) || qrc=$?
+    if [ "$qrc" = 0 ] && [ -n "$(_usage_rows_claude "$qbody")" ]; then
+      printf '  [ok]   claude account quota readable (%s window(s) from /api/oauth/usage)\n' "$(_usage_rows_claude "$qbody" | wc -l)"
+    else
+      printf '  [warn] claude account quota unavailable — %s\n' "$(_quota_why "$qrc")"
+    fi
   fi
   if command -v codex >/dev/null 2>&1; then
     cxv=$(codex --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)

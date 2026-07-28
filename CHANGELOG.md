@@ -5,6 +5,45 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.39.0] - 2026-07-28
+
+### Changed
+
+- **BREAKING — `usage` no longer installs anything, and `usage --install`/`--uninstall` are gone.**
+  0.38.0 read Claude's quota by installing a statusline into the user's `settings.json`. That was the
+  wrong shape: overseer exists to observe another agent's state without changing it, a project
+  `.claude/settings.json` silently overrode the user-level install (so it collected nothing in every
+  other project until you reran `--install --here` there), and it only sampled while a session
+  happened to be rendering. `usage` now makes a plain read-only `GET
+  https://api.anthropic.com/api/oauth/usage` with the OAuth token Claude Code already keeps in
+  `$CLAUDE_HOME/.credentials.json` — the same call `/usage` makes. No install, no config write,
+  nothing per-project, and it works over `on <host> usage`. **If you ran `usage --install` on 0.38.0,
+  run `overseer usage --uninstall` on 0.38.0 first, or delete the `statusLine` entry it added.**
+  Rationale in `docs/DECISIONS.md` ADR-0009.
+- The API response is richer than the statusline payload was: every window arrives as a `limits[]`
+  entry with `kind`, `percent`, `resets_at`, a per-model `scope` and a **server-computed `severity`**,
+  which overseer flags on ahead of its own `OVERSEER_QUOTA_WARN` threshold — so a window the server
+  calls `critical` is marked even below it.
+- Claude's context is now reported as a **plain token count** rather than a percentage:
+  `context_window_size` only ever existed in the statusline payload, never in the transcript. Codex
+  keeps its percentage (its rollout carries `model_context_window`). Context remains labelled
+  informational — it is the number this design says not to act on.
+- An account with **no OAuth credentials at all** (Bedrock/Vertex/API key/proxy) is now what
+  identifies a third-party backend, and reports `quota n/a` — a cleaner signal than "no `rate_limits`
+  field".
+- `doctor` replaces its "collector wired" check with a live probe of the endpoint; it warns rather
+  than failing, and distinguishes *no credentials*, *expired token* and *unreachable*.
+- New `OVERSEER_QUOTA_TTL` (default `300`) bounds how long the `chat`/`send`/`wait` warning may reuse
+  a cached reading, so the warning never costs a request per command. `usage` itself always fetches
+  live. The cache holds only the response — never the token — at mode 600 under
+  `${XDG_CACHE_HOME:-~/.cache}/overseer/`.
+
+### Security
+
+- overseer now reads `$CLAUDE_HOME/.credentials.json` — the first credential it has ever touched.
+  The token is sent only to `api.anthropic.com`, passed to `curl` on **stdin** rather than argv so it
+  never appears in `ps`, and is never logged or cached. `SECURITY.md` documents the full contract.
+
 ## [0.38.0] - 2026-07-28
 
 ### Added
