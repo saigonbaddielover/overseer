@@ -50,6 +50,7 @@ cmd_keys() {
   local target="${1:-}"; shift || true
   [ -n "$target" ] && [ "$#" -gt 0 ] || _die "usage: overseer keys <pane|session> <key>..."
   local pane; pane=$(_resolve_pane "$target") || _die "no tmux pane for target: $target"
+  _no_self "$pane" "send keys to"
   tmux send-keys -t "$pane" "$@"
   printf 'sent keys to %s: %s\n' "$pane" "$*"
 }
@@ -104,7 +105,7 @@ cmd_send() {
   elif [ -n "${3:-}" ]; then _die "send takes a [timeout] only with --notify (it never waits for the reply itself — use chat for that)"; fi
   local ctx pane kind path; ctx=$(_target_ctx "$target") || _die "no agent pane (claude/codex) for target: $target (if the session is split, target the pane id %N — see: overseer list)"
   IFS=$'\t' read -r pane kind path <<< "$ctx"
-  [ "$back" = "$pane" ] && _die "--notify would wake the pane it is dispatching to ($pane) — send to a different agent, or drop --notify"
+  _no_self "$pane" "send to"
   _lock_pane "$pane"
   { _queued "$pane" && ! _compacting "$pane"; } && { _unlock_pane; _die "a message is already queued to $pane behind its running turn (the agent holds one queued message at a time) — wait for it to run first: overseer wait $target, or drop it and free the slot: overseer unsend $target"; }
   local base; base=$(_h_turn_count "$kind" "$path" 2>/dev/null); base="${base:-0}"
@@ -140,6 +141,10 @@ cmd_send() {
   esac
 }
 _self_pane() { [ -n "${TMUX_PANE:-}" ] && [ "$TMUX_PANE" = "$1" ]; }
+_no_self() {
+  _self_pane "$1" || return 0
+  _die "refusing to $2 $1 — that is the pane overseer is running in, so it would drive this agent's own TUI; target a worker instead (see: overseer list)"
+}
 cmd_unsend() {
   _need tmux; _need jq
   local target="${1:-}"
@@ -236,6 +241,7 @@ cmd_chat() {
   local timeout="${3:-$DEFAULT_TIMEOUT}"; _uint "$timeout"
   local ctx pane kind path; ctx=$(_target_ctx "$target") || _die "no agent pane (claude/codex) for target: $target (if the session is split, target the pane id %N — see: overseer list)"
   IFS=$'\t' read -r pane kind path <<< "$ctx"
+  _no_self "$pane" "chat with"
   _lock_pane "$pane"
   { _queued "$pane" && ! _compacting "$pane"; } && { _unlock_pane; _die "a message is already queued to $pane behind its running turn (the agent holds one queued message at a time) — wait for it to run first: overseer wait $target, or drop it and free the slot: overseer unsend $target"; }
   local has_tx=0; { [ -n "$path" ] && [ -f "$path" ]; } && has_tx=1
@@ -284,6 +290,7 @@ cmd_wait() {
   _uint "$timeout"
   local ctx pane kind path; ctx=$(_target_ctx "$target") || _die "no agent pane (claude/codex) for target: $target (if the session is split, target the pane id %N — see: overseer list)"
   IFS=$'\t' read -r pane kind path <<< "$ctx"
+  _self_pane "$pane" && _die "refusing to wait on $pane — that is the pane overseer is running in, so the turn it would wait for cannot end until this command returns; it would only burn the timeout (see: overseer list)"
   if _awaiting "$pane" >/dev/null 2>&1; then _report_awaiting "$pane" "$target"; return 0; fi
   [ -n "$path" ] && [ -f "$path" ] || _die "no transcript yet for '$target' (a brand-new session with 0 turns has none)"
   # already ended a turn -> idle; mid-turn -> wait for the turn to end
@@ -380,8 +387,14 @@ _fleet_local() {
     wait)
       _need jq
       while :; do case "${1:-}" in --any) any=1; shift ;; *) break ;; esac; done
-      if [ "$any" = 1 ]; then _fleet_wait_any "${1:-$DEFAULT_TIMEOUT}" "${targets[@]}"
-      else for p in "${targets[@]}"; do printf '# %s: ' "$p"; ( cmd_wait "$p" "$@" ) || true; done; fi ;;
+      local -a wt=()
+      for p in "${targets[@]}"; do
+        _self_pane "$p" && { printf '# %s: (skipped — this is the pane overseer is running in)\n' "$p"; continue; }
+        wt+=("$p")
+      done
+      [ "${#wt[@]}" -gt 0 ] || { printf 'nothing to wait for — the only agent pane is the one overseer is running in\n'; return 0; }
+      if [ "$any" = 1 ]; then _fleet_wait_any "${1:-$DEFAULT_TIMEOUT}" "${wt[@]}"
+      else for p in "${wt[@]}"; do printf '# %s: ' "$p"; ( cmd_wait "$p" "$@" ) || true; done; fi ;;
     send|chat)
       [ "$action" = chat ] && _need jq
       while :; do case "${1:-}" in
@@ -512,6 +525,7 @@ cmd_sh() {
   case "$cmd" in *$'\n'*) _die "one command line only (chain with ; or &&)" ;; esac
   local pane cur
   pane=$(_resolve_pane "$target") || _die "no tmux pane for target: $target"
+  _self_pane "$pane" && _die "refusing to run a shell command in $pane — that is the pane overseer is running in, so the shell it would type into is busy running this command; target a worker instead (see: overseer list)"
   cur=$(tmux display-message -p -t "$pane" '#{pane_current_command}' 2>/dev/null) || _die "pane $pane vanished"
   _is_posix_shell "$cur" || _die "pane $pane is running '$cur', which overseer sh cannot drive (it needs a POSIX-ish shell: sh, bash, zsh, dash, ksh, mksh, ash); use keys/peek, or chat for an agent pane"
   _lock_pane "$pane"
@@ -557,6 +571,7 @@ cmd_quit() {
   _need tmux
   local target="${1:-}"; [ -n "$target" ] || _die "usage: overseer quit <pane|session>"
   local pane pp kind; pane=$(_resolve_pane "$target") || _die "no tmux pane for target: $target"
+  _self_pane "$pane" && _die "refusing to quit $pane — that is the pane overseer is running in, so it would kill this agent mid-turn; target a worker instead (see: overseer list)"
   pp=$(tmux display-message -p -t "$pane" '#{pane_pid}' 2>/dev/null) || _die "pane $pane vanished"
   kind=$(_harness_of "$pp") || _die "pane $pane is running '$(tmux display-message -p -t "$pane" '#{pane_current_command}' 2>/dev/null)', not a claude/codex agent; nothing to quit"
   _lock_pane "$pane"
@@ -609,7 +624,7 @@ cmd_stop() {
   case "$target" in
     %[0-9]*)
       local pane; pane=$(_resolve_pane "$target") || _die "no tmux pane for target: $target"
-      [ -n "${TMUX_PANE:-}" ] && [ "$TMUX_PANE" = "$pane" ] && _die "refusing to kill the pane overseer is running in ($pane) — run stop from outside it"
+      _self_pane "$pane" && _die "refusing to kill the pane overseer is running in ($pane) — run stop from outside it"
       tmux kill-pane -t "$pane" 2>/dev/null || _die "could not kill pane $pane"
       printf 'stopped pane %s\n' "$pane"
       ;;
@@ -634,6 +649,7 @@ cmd_slash() {
   case "$slash" in /*) : ;; *) slash="/$slash" ;; esac   # accept 'resume' or '/resume'
   case "$slash" in *$'\n'*) _die "one slash command line only" ;; esac
   local pane pp kind; pane=$(_resolve_pane "$target") || _die "no tmux pane for target: $target"
+  _no_self "$pane" "run a slash command in"
   pp=$(tmux display-message -p -t "$pane" '#{pane_pid}' 2>/dev/null) || _die "pane $pane vanished"
   kind=$(_harness_of "$pp") || _die "pane $pane is not a claude/codex agent; slash commands need an agent TUI"
   _lock_pane "$pane"
@@ -655,6 +671,7 @@ cmd_menu() {
   local target="${1:-}" name="${2:-}" navkey="${3:-Right}"
   [ -n "$target" ] && [ -n "$name" ] || _die "usage: overseer menu <pane|session> <item-name> [nav-key]"
   local pane; pane=$(_resolve_pane "$target") || _die "no tmux pane for target: $target"
+  _no_self "$pane" "navigate a menu in"
   _lock_pane "$pane"
   _wake_pane "$pane"
   local i sig

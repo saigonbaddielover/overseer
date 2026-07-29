@@ -5,6 +5,27 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.41.2] - 2026-07-29
+
+### Fixed
+
+- **`fleet wait` waited on the pane overseer runs in, which can never finish** — the caller is busy by
+  definition (it is running the command), so the fan-out burned the whole timeout on itself. `fleet
+  wait` and `fleet wait --any` now skip that pane with a printed note. `--any` was unaffected in
+  practice (it returns on the first pane to finish) but no longer counts the caller as in flight.
+- **Every command that drives a pane now refuses the pane overseer runs in**, not just `stop`,
+  `unsend` and `interrupt`: `send chat keys sh slash menu wait quit`. Each was guaranteed broken when
+  self-targeted — a message pasted into your own composer wipes what was half-typed there and queues
+  behind the turn that pasted it, `wait` can only return after the turn it waits for, `sh` types into
+  the shell running it, `quit` kills the agent mid-command — so they now fail fast with the reason
+  instead of hanging or clobbering. Read-only commands (`list`, `read`, `peek`, `fleet status`,
+  `fleet read`) still include that pane.
+
+### Changed
+
+- `send --notify`'s separate "would wake the pane it is dispatching to" refusal is gone; the general
+  self-target guard covers it and reports the same thing.
+
 ## [0.41.1] - 2026-07-29
 
 ### Fixed

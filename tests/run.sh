@@ -116,24 +116,49 @@ eq "self pane detected"          "0" "$(TMUX_PANE=%9 _self_pane %9 >/dev/null 2>
 eq "another pane is not self"    "1" "$(TMUX_PANE=%9 _self_pane %8 >/dev/null 2>&1; echo $?)"
 eq "no TMUX_PANE means not self" "1" "$(TMUX_PANE='' _self_pane %9 >/dev/null 2>&1; echo $?)"
 _self_refuses() {
-  ( _need() { :; }; _target_ctx() { printf '%%9\tclaude\t%s' "$C"; }
-    TMUX_PANE=%9; _lock_pane() { echo LOCKED; }
-    "$1" %9 2>&1 )
+  ( _need() { :; }; _target_ctx() { printf '%%9\tclaude\t%s' "$C"; }; _resolve_pane() { printf '%%9'; }
+    TMUX_PANE=%9; DEFAULT_TIMEOUT=5; _lock_pane() { echo LOCKED; }
+    "$@" 2>&1 )
 }
 has_txt() { case "$2" in *"$3"*) eq "$1" yes yes ;; *) eq "$1" "contains '$3'" "$2" ;; esac; }
-has_txt "unsend refuses its own pane"        "$(_self_refuses cmd_unsend)"    'refusing to unsend'
-has_txt "interrupt refuses its own pane"     "$(_self_refuses cmd_interrupt)" 'refusing to interrupt'
+has_txt "unsend refuses its own pane"    "$(_self_refuses cmd_unsend %9)"       'refusing to unsend'
+has_txt "interrupt refuses its own pane" "$(_self_refuses cmd_interrupt %9)"    'refusing to interrupt'
+has_txt "wait refuses its own pane"      "$(_self_refuses cmd_wait %9)"         'refusing to wait on'
+has_txt "send refuses its own pane"      "$(_self_refuses cmd_send %9 hi)"      'refusing to send to'
+has_txt "chat refuses its own pane"      "$(_self_refuses cmd_chat %9 hi)"      'refusing to chat with'
+has_txt "keys refuses its own pane"      "$(_self_refuses cmd_keys %9 Escape)"  'refusing to send keys to'
+has_txt "sh refuses its own pane"        "$(_self_refuses cmd_sh %9 'echo hi')" 'refusing to run a shell command in'
+has_txt "quit refuses its own pane"      "$(_self_refuses cmd_quit %9)"         'refusing to quit'
+has_txt "slash refuses its own pane"     "$(_self_refuses cmd_slash %9 /model)" 'refusing to run a slash command in'
+has_txt "menu refuses its own pane"      "$(_self_refuses cmd_menu %9 Bash)"    'refusing to navigate a menu in'
+has_txt "stop refuses its own pane"      "$(_self_refuses cmd_stop %9)"         'refusing to kill the pane'
 eq "the self guard runs before any locking"  "" \
-   "$(_self_refuses cmd_interrupt | grep -c LOCKED | sed 's/^0$//')"
+   "$(_self_refuses cmd_interrupt %9 | grep -c LOCKED | sed 's/^0$//')"
 _fleet_self() {
   ( _need() { :; }; _panes() { printf 'sess\t%%9\t1\tclaude\t/w\n'; }
-    TMUX_PANE=%9; cmd_unsend() { echo REACHED; }; cmd_interrupt() { echo REACHED; }
-    _fleet_local "$1" 2>&1 )
+    TMUX_PANE=%9; DEFAULT_TIMEOUT=5
+    cmd_unsend() { echo REACHED; }; cmd_interrupt() { echo REACHED; }
+    cmd_wait() { echo REACHED; }; _fleet_wait_any() { echo REACHED; }
+    _fleet_local "$@" 2>&1 )
 }
 has_txt  "fleet unsend skips the caller's own pane"    "$(_fleet_self unsend)"    '(skipped'
 has_txt  "fleet interrupt skips the caller's own pane" "$(_fleet_self interrupt)" '(skipped'
+has_txt  "fleet wait skips the caller's own pane"      "$(_fleet_self wait)"      '(skipped'
+has_txt  "fleet wait says so when self was the only pane" "$(_fleet_self wait)"   'nothing to wait for'
+has_txt  "fleet wait --any skips it too"               "$(_fleet_self wait --any)" '(skipped'
 eq "fleet never reaches the per-pane command for self" "" \
    "$(_fleet_self interrupt | grep -c REACHED | sed 's/^0$//')"
+eq "fleet wait never waits on self" "" \
+   "$({ _fleet_self wait; _fleet_self wait --any; } | grep -c REACHED | sed 's/^0$//')"
+_fleet_pair() {
+  ( _need() { :; }; _panes() { printf 'sess\t%%9\t1\tclaude\t/w\nsess\t%%8\t2\tclaude\t/w\n'; }
+    TMUX_PANE=%9; DEFAULT_TIMEOUT=5
+    cmd_wait() { printf 'WAITED %s\n' "$1"; }
+    _fleet_wait_any() { shift; printf 'WATCHED %s\n' "$*"; }
+    _fleet_local "$@" 2>&1 | grep -E 'WAITED|WATCHED' )
+}
+eq "fleet wait still waits on the other panes" "# %8: WAITED %8" "$(_fleet_pair wait)"
+eq "fleet wait --any watches only the other panes" "WATCHED %8" "$(_fleet_pair wait --any)"
 eq "h_intkey claude"   "Escape" "$(_h_intkey claude)"
 eq "h_intkey codex"    "Escape" "$(_h_intkey codex)"
 eq "win_intkey claude is C-c, not Escape" "C-c" "$(_win_intkey claude)"
@@ -413,7 +438,7 @@ _ntfy() { ( export DEFAULT_TIMEOUT=600
 eq "notify: refuses when overseer is not in a tmux pane" "yes" \
    "$(case "$(_ntfy '' %9)" in *'nowhere to report back'*) echo yes ;; *) echo no ;; esac)"
 eq "notify: refuses to wake the pane it dispatches to"   "yes" \
-   "$(case "$(_ntfy %9 %9)" in *'would wake the pane it is dispatching to'*) echo yes ;; *) echo no ;; esac)"
+   "$(case "$(_ntfy %9 %9)" in *'refusing to send to'*) echo yes ;; *) echo no ;; esac)"
 eq "notify: send takes a timeout only with --notify"     "yes" \
    "$(case "$( ( _need() { :; }; cmd_send %9 hi 30 ) 2>&1 )" in *'only with --notify'*) echo yes ;; *) echo no ;; esac)"
 eq "notify: fleet chat rejects --notify"                 "yes" \
