@@ -112,6 +112,10 @@ eq "h_unqueued: a retract counts" "0" "$(_h_unqueued claude "$QR" %9 >/dev/null 
 eq "h_unqueued: it running does NOT count as a retract" "1" "$(_h_unqueued claude "$QD" %9 >/dev/null 2>&1; echo $?)"
 eq "h_popkey claude" "Up"     "$(_h_popkey claude)"
 eq "h_popkey codex"  "S-Left" "$(_h_popkey codex)"
+eq "h_intkey claude"   "Escape" "$(_h_intkey claude)"
+eq "h_intkey codex"    "Escape" "$(_h_intkey codex)"
+eq "win_intkey claude is C-c, not Escape" "C-c" "$(_win_intkey claude)"
+eq "win_intkey codex"  "Escape" "$(_win_intkey codex)"
 eq "claude never steers" "1" "$(_h_steering claude "$QP" %9 >/dev/null 2>&1; echo $?)"
 
 eq "codex queue: retractable follow-ups are read" $'the queued follow-up\na second queued line' \
@@ -568,6 +572,13 @@ _win_verbs_help()     { bash "$ENTRY" --help 2>/dev/null | sed -nE 's/^[[:space:
 eq "win dispatcher verbs are non-empty" "yes" "$([ -n "$(_win_verbs_dispatch)" ] && echo yes || echo no)"
 eq "help win verbs match the cmd_win dispatcher" "" \
    "$(comm -3 <(_win_verbs_dispatch) <(_win_verbs_help) | tr -d '\t' | tr '\n' ' ' | sed 's/ *$//')"
+
+CMDLIB="$HERE/../overseer/skills/overseer/scripts/lib/commands.sh"
+_fleet_acts_dispatch() { sed -nE '/^_fleet_local\(\)/,/^\}/ s/^[[:space:]]{4}([a-z|]+)\).*/\1/p' "$CMDLIB" | tr '|' '\n' | sed '/^\*$/d;/^$/d' | sort -u; }
+_fleet_acts_help()     { bash "$ENTRY" --help 2>/dev/null | sed -nE 's/^  fleet .*\[(status\|.*)\] \[args\].*/\1/p' | head -1 | sed -E 's/\[[^]]*\]//g' | tr '|' '\n' | sed -E 's/^ +| +$//g' | sed '/^$/d' | sort -u; }
+eq "fleet dispatcher actions are non-empty" "yes" "$([ -n "$(_fleet_acts_dispatch)" ] && echo yes || echo no)"
+eq "help fleet actions match the _fleet_local dispatcher" "" \
+   "$(comm -3 <(_fleet_acts_dispatch) <(_fleet_acts_help) | tr -d '\t' | tr '\n' ' ' | sed 's/ *$//')"
 
 WINDOC="$HERE/../docs/WINDOWS.md"
 SECDOC="$HERE/../SECURITY.md"

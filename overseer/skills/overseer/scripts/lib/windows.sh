@@ -364,6 +364,79 @@ _win_read() {
     "$target" "$_WKIND" "$(_h_last_prompt "$_WKIND" "$tmp")" "$reply"
   rm -f "$tmp"
 }
+_win_queued() {
+  local tmp; tmp=$(mktemp "${TMPDIR:-/tmp}/overseer-winq.XXXXXX") || return 1
+  if _win_fetch "$_WH" "$_WTX" "$tmp"; then _h_queued "$_WKIND" "$tmp" ''; fi
+  rm -f "$tmp"
+}
+_win_unsend() {
+  _need ssh; _need jq; _need scp
+  local target="${1:-}"
+  [ -n "$target" ] || _die "usage: overseer win <host>[/name] unsend   (RETRACT the message queued behind the WINDOWS broker agent's running turn, before it runs)"
+  _win_split "$target"
+  _win_agent_ctx "$target"
+  [ "$_WKIND" = claude ] || _die "win unsend needs a claude broker — codex hands a message sent mid-turn straight to the model as a steer, so it is already in flight and no key pulls it back; let the turn finish and correct it in the next message: overseer win $target wait"
+  [ -n "$_WTX" ] || _die "no transcript yet for '$target' (a brand-new session with 0 turns has none)"
+  local q; q=$(_win_queued) || _die "could not fetch the transcript from $_WH"
+  [ -n "$q" ] || { printf 'nothing queued on %s — nothing to retract\n' "$target"; return 0; }
+  local aw; aw=$(_win_awaiting) && _die "$target is stopped at an interactive prompt, and unsend drives the same keys that move its selection — answer it first:
+$aw"
+  _lock_pane "win-$target"
+  _win_clear_box || { _unlock_pane; _die "could not empty the input box on $target before retracting — peek: overseer win $target peek"; }
+  _win_call key "-Name Up" >/dev/null || { _unlock_pane; _die "could not send the retract key to $target"; }
+  local i ok=0
+  for i in $(seq 1 20); do
+    [ -z "$(_win_queued)" ] && { ok=1; break; }
+    _nap
+  done
+  [ "$ok" = 1 ] || { _win_clear_box || true; _unlock_pane; _die "could not pull the queued message back out of $target — the agent may have finished its turn and started running it already; check it: overseer win $target peek"; }
+  _win_clear_box || { _unlock_pane; _die "pulled the message off the queue but could not clear it out of the input box on $target — it is unsubmitted, clear it yourself: overseer win $target peek"; }
+  _unlock_pane
+  printf 'retracted from %s (never ran):\n%s\n' "$target" "$q"
+}
+_win_interrupt() {
+  _need ssh; _need jq; _need scp
+  local runq=0
+  while :; do case "${1:-}" in --run-queued) runq=1; shift ;; *) break ;; esac; done
+  local target="${1:-}"
+  [ -n "$target" ] || _die "usage: overseer win <host>[/name] interrupt [--run-queued]   (stop the WINDOWS broker agent's running turn)"
+  _win_split "$target"
+  _win_agent_ctx "$target"
+  [ -n "$_WTX" ] || _die "no transcript yet for '$target' (a brand-new session with 0 turns has none)"
+  local aw; aw=$(_win_awaiting) && _die "$target is not running a turn — it is stopped at an interactive prompt waiting to be answered:
+$aw"
+  local tmp; tmp=$(mktemp "${TMPDIR:-/tmp}/overseer-wintx.XXXXXX") || _die "mktemp failed"
+  _win_fetch "$_WH" "$_WTX" "$tmp" || { rm -f "$tmp"; _die "could not fetch the transcript from $_WH"; }
+  local busy=0; _win_agent_busy "$_WKIND" "$tmp" && busy=1
+  rm -f "$tmp"
+  [ "$busy" = 1 ] || { printf '%s is not running a turn — nothing to interrupt\n' "$target"; return 0; }
+  local q=''; [ "$_WKIND" = claude ] && q=$(_win_queued)
+  if [ -n "$q" ] && [ "$runq" = 0 ]; then
+    _die "$target has a message queued behind this turn, and interrupting hands control straight to it — it starts running immediately:
+$q
+to stop everything, drop it first: overseer win $target unsend, then overseer win $target interrupt
+to interrupt and let it run: overseer win $target interrupt --run-queued"
+  fi
+  _lock_pane "win-$target"
+  _win_call key "-Name $(_win_intkey "$_WKIND")" >/dev/null || { _unlock_pane; _die "could not send the interrupt key to $target"; }
+  _unlock_pane
+  if [ -n "$q" ]; then
+    printf 'interrupted the running turn on %s; the message that was queued behind it is now running:\n%s\n' "$target" "$q"
+    return 0
+  fi
+  local i settled=0
+  for i in $(seq 1 20); do
+    tmp=$(mktemp "${TMPDIR:-/tmp}/overseer-wintx.XXXXXX") || break
+    if _win_fetch "$_WH" "$_WTX" "$tmp"; then
+      _win_agent_busy "$_WKIND" "$tmp" || settled=1
+    fi
+    rm -f "$tmp"
+    [ "$settled" = 1 ] && break
+    _nap
+  done
+  [ "$settled" = 1 ] || _die "sent the interrupt to $target but it is still running — it may be finishing a tool call; check it: overseer win $target peek"
+  printf 'interrupted %s — the turn ENDED WITH NO REPLY, so nothing it was writing was saved; resend a corrected message when you are ready: overseer win %s chat "<text>"\n' "$target" "$target"
+}
 _win_wait() {
   _need ssh; _need jq; _need scp
   local target="${1:-}" timeout="${2:-$DEFAULT_TIMEOUT}"
@@ -405,7 +478,7 @@ _win_place() {
     _WLASTSIG="$_WSIG"
     if [ "$force" = 0 ] && _win_agent_busy "$_WKIND" "$tmp"; then
       _unlock_pane
-      _die "the agent on $target looks mid-turn; wait: overseer win $target wait — or interrupt it: overseer win $target keys $([ "$_WKIND" = codex ] && printf Escape || printf C-c). If it is actually idle (a turn was aborted mid-tool), rerun with --force"
+      _die "the agent on $target looks mid-turn; wait: overseer win $target wait — or interrupt it: overseer win $target interrupt. If it is actually idle (a turn was aborted mid-tool), rerun with --force"
     fi
   fi
   if ! _win_deliver "$target" "$_WKIND" "$prompt"; then
@@ -554,7 +627,7 @@ _win_stop() {
 }
 cmd_win() {
   local target="${1:-}" verb="${2:-}"
-  [ -n "$target" ] && [ -n "$verb" ] || _die "usage: overseer win <host>[/name] <verb> [args]   (verbs: show start list peek keys sh read chat send wait quit stop slash menu — drive a remote WINDOWS console broker over ssh; e.g. overseer win admin@win-host chat 'hi')"
+  [ -n "$target" ] && [ -n "$verb" ] || _die "usage: overseer win <host>[/name] <verb> [args]   (verbs: show start list peek keys sh read chat send unsend interrupt wait quit stop slash menu — drive a remote WINDOWS console broker over ssh; e.g. overseer win admin@win-host chat 'hi')"
   shift 2
   case "$verb" in
     show)  _win_show  "$target" "$@" ;;
@@ -566,11 +639,13 @@ cmd_win() {
     read)  _win_read  "$target" "$@" ;;
     chat)  _win_chat  "$target" "$@" ;;
     send)  _win_send  "$target" "$@" ;;
+    unsend) _win_unsend "$target" "$@" ;;
+    interrupt) _win_interrupt "$@" "$target" ;;
     wait)  _win_wait  "$target" "$@" ;;
     quit)  _win_quit  "$target" "$@" ;;
     stop)  _win_stop  "$target" "$@" ;;
     slash) _win_slash "$target" "$@" ;;
     menu)  _win_menu  "$target" "$@" ;;
-    *) _die "unknown win verb '$verb' (verbs: show start list peek keys sh read chat send wait quit stop slash menu)" ;;
+    *) _die "unknown win verb '$verb' (verbs: show start list peek keys sh read chat send unsend interrupt wait quit stop slash menu)" ;;
   esac
 }

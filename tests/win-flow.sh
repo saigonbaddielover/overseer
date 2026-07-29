@@ -288,6 +288,40 @@ has "traversing name explains the rule"     "$out" 'letters, digits'
 out=$( _win_split '/two' 2>&1 ); rc=$?
 eq  "an empty host is refused"              "1" "$rc"
 
+printf -- '-- win unsend / interrupt\n'
+
+out=$( _mock; MOCK_TXFILE="$FIX/claude-queue-pending.jsonl"; MOCK_TXFILE2="$FIX/claude-queue-retracted.jsonl"; cmd_win host unsend 2>&1 )
+has   "win unsend reports what it dropped"      "$out" 'the queued follow-up'
+has   "win unsend sends the retract key"        "$(calls)" 'key -Name Up'
+has   "win unsend clears the box afterwards"    "$(calls)" 'clear'
+has   "win unsend releases the lock"            "$(calls)" 'unlock'
+
+out=$( _mock; MOCK_TXFILE="$FIX/claude-queue-retracted.jsonl"; cmd_win host unsend 2>&1 )
+has   "win unsend with nothing queued is a no-op" "$out" 'nothing queued'
+lacks "win unsend with nothing queued sends no key" "$(calls)" 'key '
+
+out=$( _mock; MOCK_TXFILE="$FIX/claude-queue-pending.jsonl"; cmd_win host unsend 2>&1 )
+has   "win unsend that cannot pull it back fails loudly" "$out" 'could not pull the queued message back'
+
+out=$( _mock; MOCK_KIND=codex; MOCK_TXFILE="$FIX/codex-busy.jsonl"; cmd_win host unsend 2>&1 )
+has   "win unsend refuses a codex broker"       "$out" 'steer'
+lacks "win unsend never keys a codex broker"    "$(calls)" 'key '
+
+out=$( _mock; MOCK_TXFILE="$FIX/claude-busy.jsonl"; MOCK_TXFILE2="$FIX/claude-turn.jsonl"; MOCK_TXSWITCH=2; cmd_win host interrupt 2>&1 )
+has   "win interrupt on claude sends C-c, not Escape" "$(calls)" 'key -Name C-c'
+has   "win interrupt says no reply was saved"   "$out" 'ENDED WITH NO REPLY'
+
+out=$( _mock; MOCK_KIND=codex; MOCK_TXFILE="$FIX/codex-busy.jsonl"; MOCK_TXFILE2="$FIX/codex-turn.jsonl"; MOCK_TXSWITCH=2; cmd_win host interrupt 2>&1 )
+has   "win interrupt on codex sends Escape"     "$(calls)" 'key -Name Escape'
+
+out=$( _mock; MOCK_TXFILE="$FIX/claude-turn.jsonl"; cmd_win host interrupt 2>&1 )
+has   "win interrupt on an idle agent is a no-op" "$out" 'nothing to interrupt'
+lacks "win interrupt on an idle agent sends no key" "$(calls)" 'key '
+
+out=$( _mock; MOCK_TXFILE="$FIX/claude-busy.jsonl"; MOCK_TXFILE2="$FIX/claude-queue-pending.jsonl"; MOCK_TXSWITCH=1; cmd_win host interrupt 2>&1 )
+has   "win interrupt refuses while a message is queued" "$out" 'queued behind this turn'
+lacks "win interrupt refusal sends no key"      "$(calls)" 'key '
+
 if [ "$fail" = 0 ]; then
   printf 'PASS: all windows flow tests\n'; exit 0
 else

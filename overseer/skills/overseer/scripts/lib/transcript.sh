@@ -137,6 +137,8 @@ _h_queued()     { case "$1" in claude) _cl_queued "$2" ;; codex) _cx_queued "$3"
 _h_unqueued()   { case "$1" in claude) [ "$(_cl_queue_op "$2")" = popAll ] ;; codex) [ -z "$(_cx_queued "$3")" ] ;; esac; }
 _h_steering()   { case "$1" in claude) return 1 ;; codex) _cx_steering "$3" ;; esac; }
 _h_popkey()     { case "$1" in claude) printf 'Up' ;; codex) printf 'S-Left' ;; esac; }
+_h_intkey()     { case "$1" in claude|codex) printf 'Escape' ;; esac; }
+_win_intkey()   { case "$1" in claude) printf 'C-c' ;; codex) printf 'Escape' ;; esac; }
 _file_sig() { stat -c '%Y:%s' "$1" 2>/dev/null || true; }
 _marker_since() {
   local f="$CLAUDE_HOME/$1/$2" m
