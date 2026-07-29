@@ -139,12 +139,14 @@ cmd_send() {
     *) printf 'sent to %s (turn started):\n%s\n' "$pane" "$msg" ;;
   esac
 }
+_self_pane() { [ -n "${TMUX_PANE:-}" ] && [ "$TMUX_PANE" = "$1" ]; }
 cmd_unsend() {
   _need tmux; _need jq
   local target="${1:-}"
   [ -n "$target" ] || _die "usage: overseer unsend <pane|session>"
   local ctx pane kind path; ctx=$(_target_ctx "$target") || _die "no agent pane (claude/codex) for target: $target (if the session is split, target the pane id %N — see: overseer list)"
   IFS=$'\t' read -r pane kind path <<< "$ctx"
+  _self_pane "$pane" && _die "refusing to unsend on $pane — that is the pane overseer is running in, so the queue it would empty is this agent's own; target a worker instead (see: overseer list)"
   _lock_pane "$pane"
   local q; q=$(_h_queued "$kind" "$path" "$pane")
   if [ -z "$q" ]; then
@@ -184,6 +186,7 @@ cmd_interrupt() {
   [ -n "$target" ] || _die "usage: overseer interrupt [--run-queued] <pane|session>"
   local ctx pane kind path; ctx=$(_target_ctx "$target") || _die "no agent pane (claude/codex) for target: $target (if the session is split, target the pane id %N — see: overseer list)"
   IFS=$'\t' read -r pane kind path <<< "$ctx"
+  _self_pane "$pane" && _die "refusing to interrupt $pane — that is the pane overseer is running in, so the turn it would stop is this agent's own; target a worker instead (see: overseer list)"
   _lock_pane "$pane"
   _awaiting "$pane" >/dev/null && { _unlock_pane; _die "$pane is not running a turn — it is stopped at an interactive prompt waiting to be answered: overseer peek $target"; }
   { [ -n "$path" ] && [ -f "$path" ] && _agent_busy "$kind" "$path" "$pane"; } || {
@@ -360,11 +363,20 @@ _fleet_local() {
   case "$action" in
     status) _need jq; printf 'PANE\tHARNESS\tSTATE\n'; for p in "${targets[@]}"; do ( _fleet_status "$p" ) || true; done ;;
     read)   _need jq; for p in "${targets[@]}"; do printf '===== %s =====\n' "$p"; ( cmd_read "$p" ) || printf '(unavailable)\n'; done ;;
-    unsend) _need jq; for p in "${targets[@]}"; do printf '===== %s =====\n' "$p"; ( cmd_unsend "$p" ) || true; done ;;
+    unsend) _need jq
+      for p in "${targets[@]}"; do
+        printf '===== %s =====\n' "$p"
+        _self_pane "$p" && { printf '(skipped — this is the pane overseer is running in)\n'; continue; }
+        ( cmd_unsend "$p" ) || true
+      done ;;
     interrupt)
       _need jq
       local -a ifl=(); while :; do case "${1:-}" in --run-queued) ifl+=("$1"); shift ;; *) break ;; esac; done
-      for p in "${targets[@]}"; do printf '===== %s =====\n' "$p"; ( cmd_interrupt ${ifl[@]+"${ifl[@]}"} "$p" ) || true; done ;;
+      for p in "${targets[@]}"; do
+        printf '===== %s =====\n' "$p"
+        _self_pane "$p" && { printf '(skipped — this is the pane overseer is running in)\n'; continue; }
+        ( cmd_interrupt ${ifl[@]+"${ifl[@]}"} "$p" ) || true
+      done ;;
     wait)
       _need jq
       while :; do case "${1:-}" in --any) any=1; shift ;; *) break ;; esac; done

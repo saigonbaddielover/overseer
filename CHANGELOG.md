@@ -5,6 +5,16 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.41.1] - 2026-07-29
+
+### Fixed
+
+- **`interrupt` and `unsend` refused to target the pane overseer is running in.** They did not, and
+  `fleet interrupt` therefore reached the dispatching agent's own pane in the fan-out — an admin
+  stopping its fleet would have stopped itself mid-turn. Both now refuse a self-target the way `stop`
+  already did (comparing the *resolved* pane, so a session name cannot slip past it), and the `fleet`
+  fan-out skips that pane with a printed note instead of acting on it.
+
 ## [0.41.0] - 2026-07-29
 
 ### Added

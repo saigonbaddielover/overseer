@@ -112,6 +112,28 @@ eq "h_unqueued: a retract counts" "0" "$(_h_unqueued claude "$QR" %9 >/dev/null 
 eq "h_unqueued: it running does NOT count as a retract" "1" "$(_h_unqueued claude "$QD" %9 >/dev/null 2>&1; echo $?)"
 eq "h_popkey claude" "Up"     "$(_h_popkey claude)"
 eq "h_popkey codex"  "S-Left" "$(_h_popkey codex)"
+eq "self pane detected"          "0" "$(TMUX_PANE=%9 _self_pane %9 >/dev/null 2>&1; echo $?)"
+eq "another pane is not self"    "1" "$(TMUX_PANE=%9 _self_pane %8 >/dev/null 2>&1; echo $?)"
+eq "no TMUX_PANE means not self" "1" "$(TMUX_PANE='' _self_pane %9 >/dev/null 2>&1; echo $?)"
+_self_refuses() {
+  ( _need() { :; }; _target_ctx() { printf '%%9\tclaude\t%s' "$C"; }
+    TMUX_PANE=%9; _lock_pane() { echo LOCKED; }
+    "$1" %9 2>&1 )
+}
+has_txt() { case "$2" in *"$3"*) eq "$1" yes yes ;; *) eq "$1" "contains '$3'" "$2" ;; esac; }
+has_txt "unsend refuses its own pane"        "$(_self_refuses cmd_unsend)"    'refusing to unsend'
+has_txt "interrupt refuses its own pane"     "$(_self_refuses cmd_interrupt)" 'refusing to interrupt'
+eq "the self guard runs before any locking"  "" \
+   "$(_self_refuses cmd_interrupt | grep -c LOCKED | sed 's/^0$//')"
+_fleet_self() {
+  ( _need() { :; }; _panes() { printf 'sess\t%%9\t1\tclaude\t/w\n'; }
+    TMUX_PANE=%9; cmd_unsend() { echo REACHED; }; cmd_interrupt() { echo REACHED; }
+    _fleet_local "$1" 2>&1 )
+}
+has_txt  "fleet unsend skips the caller's own pane"    "$(_fleet_self unsend)"    '(skipped'
+has_txt  "fleet interrupt skips the caller's own pane" "$(_fleet_self interrupt)" '(skipped'
+eq "fleet never reaches the per-pane command for self" "" \
+   "$(_fleet_self interrupt | grep -c REACHED | sed 's/^0$//')"
 eq "h_intkey claude"   "Escape" "$(_h_intkey claude)"
 eq "h_intkey codex"    "Escape" "$(_h_intkey codex)"
 eq "win_intkey claude is C-c, not Escape" "C-c" "$(_win_intkey claude)"
