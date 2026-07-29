@@ -172,6 +172,55 @@ cmd_unsend() {
   [ -n "$draft" ] && printf 'also discarded the unsent draft that was sitting in the input box:\n%s\n' "$draft"
   return 0
 }
+cmd_interrupt() {
+  _need tmux; _need jq
+  local runq=0
+  while :; do case "${1:-}" in
+    --run-queued) runq=1; shift ;;
+    -*) _die "usage: overseer interrupt [--run-queued] <pane|session>" ;;
+    *) break ;;
+  esac; done
+  local target="${1:-}"
+  [ -n "$target" ] || _die "usage: overseer interrupt [--run-queued] <pane|session>"
+  local ctx pane kind path; ctx=$(_target_ctx "$target") || _die "no agent pane (claude/codex) for target: $target (if the session is split, target the pane id %N — see: overseer list)"
+  IFS=$'\t' read -r pane kind path <<< "$ctx"
+  _lock_pane "$pane"
+  _awaiting "$pane" >/dev/null && { _unlock_pane; _die "$pane is not running a turn — it is stopped at an interactive prompt waiting to be answered: overseer peek $target"; }
+  { [ -n "$path" ] && [ -f "$path" ] && _agent_busy "$kind" "$path" "$pane"; } || {
+    _unlock_pane; printf '%s is not running a turn — nothing to interrupt\n' "$pane"; return 0
+  }
+  local q; q=$(_h_queued "$kind" "$path" "$pane")
+  { [ -z "$q" ] && _h_steering "$kind" "$path" "$pane"; } && q='(a message already handed to the model as a steer)'
+  if [ -n "$q" ] && [ "$runq" = 0 ]; then
+    _unlock_pane
+    _die "$pane has a message queued behind this turn, and interrupting hands control straight to it — it starts running immediately:
+$q
+to stop everything, drop it first: overseer unsend $target, then overseer interrupt $target
+to interrupt and let it run: overseer interrupt --run-queued $target"
+  fi
+  tmux send-keys -t "$pane" "$(_h_intkey "$kind")"
+  local i settled=0
+  if [ -n "$q" ]; then
+    for i in $(seq 1 40); do
+      [ -z "$(_h_queued "$kind" "$path" "$pane")" ] && { settled=1; break; }
+      _nap
+    done
+    _unlock_pane
+    [ "$settled" = 1 ] || _die "sent the interrupt to $pane but its queued message never left the queue — check it: overseer peek $target"
+    printf 'interrupted the running turn on %s; the message that was queued behind it is now running:\n%s\n' "$pane" "$q"
+    return 0
+  fi
+  for i in $(seq 1 20); do
+    _agent_busy "$kind" "$path" "$pane" || { settled=1; break; }
+    _nap
+  done
+  _unlock_pane
+  [ "$settled" = 1 ] || _die "sent the interrupt to $pane but it is still running — it may be finishing a tool call; check it: overseer peek $target"
+  printf 'interrupted %s — the turn ENDED WITH NO REPLY, so nothing it was writing was saved; resend a corrected message when you are ready: overseer send %s "<text>"\n' "$pane" "$target"
+  local back; back=$(_realtext "$pane")
+  [ -n "$back" ] && printf 'the agent put the interrupted prompt back in its input box (unsubmitted, and any send/chat clears it first):\n%s\n' "$back"
+  return 0
+}
 # send + wait for the turn to finish + print the reply (the human round-trip).
 cmd_chat() {
   _need tmux; _need jq
@@ -311,6 +360,11 @@ _fleet_local() {
   case "$action" in
     status) _need jq; printf 'PANE\tHARNESS\tSTATE\n'; for p in "${targets[@]}"; do ( _fleet_status "$p" ) || true; done ;;
     read)   _need jq; for p in "${targets[@]}"; do printf '===== %s =====\n' "$p"; ( cmd_read "$p" ) || printf '(unavailable)\n'; done ;;
+    unsend) _need jq; for p in "${targets[@]}"; do printf '===== %s =====\n' "$p"; ( cmd_unsend "$p" ) || true; done ;;
+    interrupt)
+      _need jq
+      local -a ifl=(); while :; do case "${1:-}" in --run-queued) ifl+=("$1"); shift ;; *) break ;; esac; done
+      for p in "${targets[@]}"; do printf '===== %s =====\n' "$p"; ( cmd_interrupt ${ifl[@]+"${ifl[@]}"} "$p" ) || true; done ;;
     wait)
       _need jq
       while :; do case "${1:-}" in --any) any=1; shift ;; *) break ;; esac; done
@@ -335,7 +389,7 @@ _fleet_local() {
         if [ "$action" = send ]; then ( cmd_send ${fl[@]+"${fl[@]}"} "$p" "$msg" ${nt[@]+"${nt[@]}"} ) || true
         else ( cmd_chat ${fl[@]+"${fl[@]}"} "$p" "$msg" ) || true; fi
       done ;;
-    *) _die "usage: overseer fleet [--hosts|--tailscale [--os NAME]] [-u USER] [status|read|wait [--any] [timeout]|send [--yes] [--notify] <msg> [notify_timeout]|chat [--yes] <msg>]  (no subcommand = status)" ;;
+    *) _die "usage: overseer fleet [--hosts|--tailscale [--os NAME]] [-u USER] [status|read|unsend|interrupt [--run-queued]|wait [--any] [timeout]|send [--yes] [--notify] <msg> [notify_timeout]|chat [--yes] <msg>]  (no subcommand = status)" ;;
   esac
 }
 _fleet_survey() {
@@ -380,7 +434,7 @@ _fleet_gate() {
 cmd_fleet() {
   _need tmux
   local remote=0 usetail=0 osfilter='' defuser="${OVERSEER_HOSTS_USER:-}"
-  local u='usage: overseer fleet [--hosts|--tailscale [--os NAME]] [-u USER] [status|read|wait [--any] [timeout]|send [--yes] [--dry-run] [--notify] <msg> [notify_timeout]|chat [--yes] [--dry-run] <msg>]'
+  local u='usage: overseer fleet [--hosts|--tailscale [--os NAME]] [-u USER] [status|read|unsend|interrupt [--run-queued]|wait [--any] [timeout]|send [--yes] [--dry-run] [--notify] <msg> [notify_timeout]|chat [--yes] [--dry-run] <msg>]'
   while :; do case "${1:-}" in
     --hosts) remote=1; shift ;;
     --tailscale) remote=1; usetail=1; shift ;;

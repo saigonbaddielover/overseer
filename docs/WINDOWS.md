@@ -183,7 +183,13 @@ is not evidence, because a mangled prompt can still *look* plausible in the grid
 - **`keys Escape` does interrupt a running Codex turn on the Windows console**, even though a raw `ESC`
   *byte* never reaches the child: the broker sends it as a key event (`vk=0x1B`), not as paste text.
   Verified live — the rollout gets `turn_aborted` and the TUI prints `Conversation interrupted`. Claude
-  behaves as on Linux: Escape does nothing, one `C-c` interrupts.
+  behaves as on Linux: Escape does nothing, one `C-c` interrupts. `win <host> interrupt` encodes exactly
+  this split (`_win_intkey`: `C-c` for Claude, `Escape` for Codex) — note it differs from the Linux
+  `interrupt`, where Claude takes `Escape`.
+- **`win <host> unsend` works on the fetched transcript, not the console screen.** The queued message is
+  read from the scp'd Claude transcript's `queue-operation` records, so a draft sitting in the console
+  box cannot hide it, and the retract is confirmed by a `popAll` record rather than by trusting the
+  keystroke. The key itself is the same `Up` as on Linux, followed by the broker's `clear`.
 - `Split-Path -Leaf` returns **empty** for `\\.\pipe\<name>` — PowerShell treats it as a UNC root.
 - `[System.Diagnostics.Process]::Start($psi)` can return a *String* in this context, and the child's
   "first descendant" may be `conhost`, not the agent. `Start-Process -PassThru` gives the exact pid.

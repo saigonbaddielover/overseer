@@ -55,6 +55,7 @@ main() {
     keys) cmd_keys "$@" ;;
     send) cmd_send "$@" ;;
     unsend) cmd_unsend "$@" ;;
+    interrupt) cmd_interrupt "$@" ;;
     chat) cmd_chat "$@" ;;
     wait) cmd_wait "$@" ;;
     fleet) cmd_fleet "$@" ;;
@@ -83,8 +84,9 @@ main() {
       printf '  send  [--yes] [--notify] <t> <msg|-> [notify_timeout]  agent: paste + verify + submit, confirm the turn started (no reply wait); queues + says so if the agent is busy/compacting\n'
       printf '        --notify also arms a detached watcher: when that agent leaves its turn (done / stopped at a prompt / died) it PASTES a wake-up into the pane you ran this from, so a dispatcher does not have to sit and poll\n'
       printf '  unsend <t>                 agent: RETRACT the message queued behind the running turn, before it runs (claude only — codex hands a mid-turn message straight to the model as a steer, which nothing can pull back)\n'
+      printf '  interrupt [--run-queued] <t>  agent: STOP the running turn (no reply is saved). refuses if a message is queued behind it, because interrupting starts that message immediately — unsend it first, or pass --run-queued\n'
       printf '  wait  <t> [timeout]        agent: block until the turn finishes\n'
-      printf '  fleet [--hosts|--tailscale [--os NAME]] [-u USER] [status|read|wait [--any]|send [--notify]|chat] [args]  every LOCAL agent pane at once (default status; send/chat broadcast); with --hosts/--tailscale also fan out over the inventory hosts (each runs "on <host> fleet")\n'
+      printf '  fleet [--hosts|--tailscale [--os NAME]] [-u USER] [status|read|unsend|interrupt [--run-queued]|wait [--any]|send [--notify]|chat] [args]  every LOCAL agent pane at once (default status; send/chat broadcast; unsend/interrupt fan out the per-pane command); with --hosts/--tailscale also fan out over the inventory hosts (each runs "on <host> fleet")\n'
       printf '        wait fans a per-pane wait over all panes; wait --any returns as soon as the FIRST in-flight pane finishes/awaits/exits (for a poll loop); send --notify arms one watcher per pane instead, so you go idle and get woken. a fleet-wide send/chat first PREVIEWS which idle agents would receive it and asks once before sending; --dry-run stops after the preview, --yes skips it (scripts)\n'
       printf '  quit  <t>                  agent: exit the TUI (claude Ctrl-C x2, codex x1), reveal the shell, keep tmux\n'
       printf '  slash <t> </cmd>           agent: run a slash command (/model /status ...; claude /resume /clear ...)\n'
@@ -100,7 +102,7 @@ main() {
       printf '  hosts [--list] [--tailscale] [--os NAME] [-u USER] [-t secs]  survey the fleet: per host print user@host + online/os/ssh/drive-able (inventory from OVERSEER_HOSTS, ~/.ssh/config, or --tailscale; -u sets the login user for bare hosts)\n'
       printf '  provision [--dry-run] <host>  install the missing Linux drive deps (tmux+jq) on a remote ssh host (needs root/passwordless sudo); fixes a hosts DRIVE=no:tmux/no:jq\n'
       printf '  win   <host>[/name] <verb> [args]  drive a remote WINDOWS console broker over ssh (the win prefix is to Windows what "on <host>" is to remote Linux); e.g. overseer win admin@win-host chat "hi"\n'
-      printf '        win verbs: show start list peek keys sh read chat send wait quit stop slash menu\n'
+      printf '        win verbs: show start list peek keys sh read chat send unsend interrupt wait quit stop slash menu\n'
       printf '          start [pwsh|claude|codex] [workdir]  start/switch a VISIBLE broker child (/name on the host to run several side by side; see: win <host> list)\n'
       printf '          show  [app]                          open a GUI app (default Windows Terminal) on the VISIBLE console session\n'
       printf '          peek | keys <key|text>... | sh <command> [timeout]  snapshot the screen / send keys or text / run one pwsh command line\n'

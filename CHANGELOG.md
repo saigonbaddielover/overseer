@@ -5,6 +5,37 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.41.0] - 2026-07-29
+
+### Added
+
+- **`interrupt [--run-queued] <target>` — stop the turn that is running right now.** `unsend` covers a
+  message that has not started; this covers the one that has. The turn ends with **no reply**, and the
+  command verifies the agent actually settled rather than assuming the keystroke landed.
+
+  It **refuses while a message is queued** behind that turn, because interrupting hands control
+  straight to the queued message and it starts immediately — measured, not assumed. To stop everything,
+  `unsend` first and then `interrupt`; to interrupt and let the queued one take over, pass
+  `--run-queued`, which then reports which message is now running. When Claude puts the interrupted
+  prompt back into the input box, that is reported too instead of being left as a surprise.
+
+- **`fleet unsend` and `fleet interrupt [--run-queued]`** — the per-pane commands fanned out over every
+  local agent pane, and over the inventory hosts with `--hosts`/`--tailscale`, so clearing a broadcast
+  that turned out wrong, or stopping a whole fleet mid-turn, is one call instead of a loop.
+
+- **`win <host> unsend` and `win <host> interrupt [--run-queued]`** — the same two on a remote Windows
+  console broker. `unsend` reads the queue from the scp'd transcript, so a draft in the console box
+  cannot hide it and the retract is confirmed by a `popAll` record rather than by trusting the key.
+  The interrupt key differs from Linux for Claude — the Windows console takes **`C-c`**, since a raw
+  `ESC` byte never reaches the child, while Codex takes `Escape`. The `win send`/`chat` mid-turn
+  refusal now points at `win <host> interrupt` instead of a raw `keys` invocation.
+
+### Notes
+
+- Codex accepts the interrupt while the model request is in flight; once it is streaming the final
+  answer, Escape no longer stops it. `interrupt` reports that it could not confirm the agent settled
+  rather than claiming a success it did not get.
+
 ## [0.40.0] - 2026-07-29
 
 ### Added

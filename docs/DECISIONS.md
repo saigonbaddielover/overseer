@@ -546,3 +546,39 @@ with that explanation. Pretending would be the same false success the transcript
 **Cost.** Two harness-specific screen strings for Codex, and a `_realtext` fix that the queued
 placeholder exposed: Claude emits the ghost as `ESC[2m ESC[39m text`, and the stripper had assumed the
 text followed `ESC[2m` directly, so every box-clearing path failed on an empty box in that state.
+
+## ADR-0011 — Interrupting is a separate verb from retracting, and it refuses to guess
+
+**Context.** ADR-0010 made a *queued* message retractable. The message that has already started running
+was still unreachable: the only lever was `keys <t> Escape` by hand, with no verification that anything
+stopped. A dispatcher that spots duplicated work seconds too late needs the second lever, and needs it
+to be as self-verifying as the first.
+
+**Decision.** Add `interrupt [--run-queued]`, fan it and `unsend` out through `fleet`, and give both to
+the Windows broker as `win <host> unsend` / `win <host> interrupt`.
+
+**The queue interaction is the whole design.** Measured on Claude: pressing Escape while a message sits
+in the queue does *not* just abort the turn — it aborts it and the queued message starts running
+immediately (the transcript shows `dequeue`, not `popAll`). An `interrupt` that quietly did that would
+be the opposite of what "stop" means to the caller. So it **refuses by default** and names both ways
+out: `unsend` then `interrupt` to stop everything, or `--run-queued` to accept the handover — in which
+case it reports *which* message is now running. Codex's in-flight steer is treated the same way, since
+it has the same effect.
+
+**Per-platform interrupt keys, kept in one seam.** Linux Claude and Codex both interrupt on `Escape`.
+The Windows console does not: a raw `ESC` byte never reaches the child there, so Claude needs `C-c`
+while Codex's `Escape` still works because the broker sends it as a key *event*. That is two functions
+(`_h_intkey`, `_win_intkey`), pinned by tests, rather than a conditional at each call site.
+
+**Verify, never assume.** Every path polls until the agent actually settles and fails loudly if it does
+not. That matters because the guarantee is not uniform: Codex accepts the interrupt while the model
+request is in flight, but once it is streaming the final answer Escape stops working — measured against
+codex-cli 0.145.0. The command reports "sent the interrupt but it is still running" instead of a
+success it did not get. Claude also puts the interrupted prompt back into its input box; that is
+reported rather than left as a surprise for whoever peeks next.
+
+**What was deliberately not changed.** A first pass loosened `_agent_busy` so a Codex transcript that
+claims to be running could be vetoed by a still screen, on the theory that Codex had stopped recording
+`turn_aborted`. That was a misdiagnosis — the pane was genuinely still generating. Codex does record
+`turn_aborted` on a real interrupt, and the change was reverted: the fast path stays, and the screen
+veto stays Claude-only where ADR-0006 put it.
