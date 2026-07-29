@@ -99,6 +99,33 @@ eq "compacting claude"     "0"  "$(_compacting_text "$(cat "$FIX/compacting-clau
 eq "compacting rejects prose mentions" "1"  "$(_compacting_text "$(cat "$FIX/compacting-none.txt")" >/dev/null 2>&1; echo $?)"
 eq "queued detected"       "0"  "$(_queued_text "$(cat "$FIX/compacting-claude.txt")" >/dev/null 2>&1; echo $?)"
 eq "queued absent"         "1"  "$(_queued_text "$(cat "$FIX/compacting-none.txt")" >/dev/null 2>&1; echo $?)"
+
+QP="$FIX/claude-queue-pending.jsonl"; QR="$FIX/claude-queue-retracted.jsonl"; QD="$FIX/claude-queue-ran.jsonl"
+eq "claude queue: pending message is readable"  "the queued follow-up" "$(_cl_queued "$QP")"
+eq "claude queue: retracted reads empty"        ""                     "$(_cl_queued "$QR")"
+eq "claude queue: a message that ran reads empty" ""                   "$(_cl_queued "$QD")"
+eq "claude queue: no queue-operation record at all" ""                 "$(_cl_queued "$C")"
+eq "claude queue: last op after a retract"      "popAll"               "$(_cl_queue_op "$QR")"
+eq "claude queue: last op once it started running" "dequeue"           "$(_cl_queue_op "$QD")"
+eq "h_queued claude dispatch"    "the queued follow-up" "$(_h_queued claude "$QP" %9)"
+eq "h_unqueued: a retract counts" "0" "$(_h_unqueued claude "$QR" %9 >/dev/null 2>&1; echo $?)"
+eq "h_unqueued: it running does NOT count as a retract" "1" "$(_h_unqueued claude "$QD" %9 >/dev/null 2>&1; echo $?)"
+eq "h_popkey claude" "Up"     "$(_h_popkey claude)"
+eq "h_popkey codex"  "S-Left" "$(_h_popkey codex)"
+eq "claude never steers" "1" "$(_h_steering claude "$QP" %9 >/dev/null 2>&1; echo $?)"
+
+eq "codex queue: retractable follow-ups are read" $'the queued follow-up\na second queued line' \
+   "$(_cx_queued_text "$(cat "$FIX/codex-queued.txt")")"
+eq "codex queue: end-of-turn messages are retractable too" "retractable during a review" \
+   "$(_cx_queued_text "$(cat "$FIX/codex-queued-end-of-turn.txt")")"
+eq "codex queue: an in-flight steer is NOT retractable" "" \
+   "$(_cx_queued_text "$(cat "$FIX/codex-steer.txt")")"
+eq "codex steer detected"        "0" "$(_cx_steering_text "$(cat "$FIX/codex-steer.txt")"  >/dev/null 2>&1; echo $?)"
+eq "codex steer absent on queue" "1" "$(_cx_steering_text "$(cat "$FIX/codex-queued.txt")" >/dev/null 2>&1; echo $?)"
+
+eq "realtext: empty box reads empty"                  ""                  "$(_realtext_of "$(cat "$FIX/claude-box-empty.txt")")"
+eq "realtext: a dim ghost split by an SGR reads empty" ""                 "$(_realtext_of "$(cat "$FIX/claude-ghost-queued.txt")")"
+eq "realtext: real typed text survives"               "half typed draft"  "$(_realtext_of "$(cat "$FIX/claude-box-draft.txt")")"
 eq "awaiting win console"  "0"                         "$(_awaiting_text "$(cat "$FIX/awaiting-windows-console.txt")" '❯›>' >/dev/null 2>&1; echo $?)"
 eq "linux ignores ascii >"        "1"                  "$(_awaiting_text "$(cat "$FIX/awaiting-windows-console.txt")" >/dev/null 2>&1; echo $?)"
 eq "markdown quote not awaiting"  "1"                  "$(_awaiting_text "$(cat "$FIX/awaiting-none-markdown-quote.txt")" >/dev/null 2>&1; echo $?)"

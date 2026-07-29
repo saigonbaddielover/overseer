@@ -57,6 +57,15 @@ _last_api_error() {
           t: ((.message.content // []) | map(select(.type=="text") | .text) | join("\n")) })
     | if .e then "\(.s)\t\(.t)" else "" end' "$1" 2>/dev/null
 }
+_cl_queued() {
+  jq -rn '[inputs | select(.type=="queue-operation")]
+    | reduce .[] as $o ([];
+        if $o.operation == "enqueue" then . + [$o.content // ""]
+        elif $o.operation == "popAll" then []
+        else (if length > 0 then .[1:] else . end) end)
+    | .[]' "$1" 2>/dev/null
+}
+_cl_queue_op() { jq -rn 'last(inputs | select(.type=="queue-operation") | .operation) // ""' "$1" 2>/dev/null; }
 _sid_from_jsonl() { jq -r 'select(.sessionId != null and .sessionId != "") | .sessionId' "$1" 2>/dev/null | head -1; }
 # ---- Codex rollout readers (~/.codex/sessions/**/rollout-*.jsonl) ----------
 # a Codex turn is an `event_msg` task_started ... task_complete pair; task_complete even carries the
@@ -124,6 +133,10 @@ _h_reply_for()  { case "$1" in claude) _reply_for_prompt "$2" "$3" ;; codex) _cx
 _h_answered()   { case "$1" in claude) _answered "$2" "$3" ;; codex) _cx_answered "$2" "$3" ;; esac; }
 _h_last_prompt(){ case "$1" in claude) _last_prompt "$2" ;; codex) _cx_last_prompt "$2" ;; esac; }
 _h_last_error() { case "$1" in claude) _last_api_error "$2" ;; codex) _cx_last_api_error "$2" ;; esac; }
+_h_queued()     { case "$1" in claude) _cl_queued "$2" ;; codex) _cx_queued "$3" ;; esac; }
+_h_unqueued()   { case "$1" in claude) [ "$(_cl_queue_op "$2")" = popAll ] ;; codex) [ -z "$(_cx_queued "$3")" ] ;; esac; }
+_h_steering()   { case "$1" in claude) return 1 ;; codex) _cx_steering "$3" ;; esac; }
+_h_popkey()     { case "$1" in claude) printf 'Up' ;; codex) printf 'S-Left' ;; esac; }
 _file_sig() { stat -c '%Y:%s' "$1" 2>/dev/null || true; }
 _marker_since() {
   local f="$CLAUDE_HOME/$1/$2" m
