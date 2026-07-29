@@ -5,6 +5,19 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.41.3] - 2026-07-29
+
+### Added
+
+- **`doctor` diagnoses a tmux client/server build mismatch.** A tmux client only speaks to a server of
+  its own protocol version, so on a machine with two installs (e.g. `/usr/bin/tmux` 3.4 beside
+  `/usr/local/bin/tmux` 3.6a) anything run through the wrong one fails with `server exited
+  unexpectedly` — which reads like the server died, when it is fine and every session is still there.
+  `doctor` now resolves the running server's binary from `/proc` and compares it with the `tmux` on
+  `PATH`, naming both. It also separates "no tmux server yet" (a warning) from "a server is running but
+  this tmux cannot reach it" (a failure). overseer itself pins no tmux version and never calls a fixed
+  path, so it follows whichever tmux is on `PATH`; the README now says so.
+
 ## [0.41.2] - 2026-07-29
 
 ### Fixed

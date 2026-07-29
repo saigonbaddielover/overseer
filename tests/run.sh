@@ -524,6 +524,14 @@ eq "doctor probe schema shift FAILS" "rc=1" "$(_probe 1)"
 eq "doctor probe no-session is ok"   "rc=0" "$(_probe 2)"
 eq "doctor probe schema shift is not a warn" "yes" \
    "$( ( _probe_contract() { printf 'x.jsonl'; return 1; }; case "$(_doctor_probe claude)" in *'[FAIL]'*) echo yes ;; *) echo no ;; esac ) )"
+eq "tmux: one build is not a mismatch"   "1" "$(_tmux_mismatch /usr/bin/tmux /usr/bin/tmux; echo $?)"
+eq "tmux: two builds are a mismatch"     "0" "$(_tmux_mismatch /usr/bin/tmux /usr/local/bin/tmux; echo $?)"
+eq "tmux: an unreadable server binary is not a mismatch" "1" "$(_tmux_mismatch /usr/bin/tmux ''; echo $?)"
+eq "tmux: no client binary is not a mismatch"           "1" "$(_tmux_mismatch '' /usr/local/bin/tmux; echo $?)"
+_tmm=$(_tmux_mismatch_text /usr/bin/tmux 'tmux 3.4' /usr/local/bin/tmux)
+has_txt "the mismatch text names the PATH binary"   "$_tmm" '/usr/bin/tmux (tmux 3.4)'
+has_txt "the mismatch text names the server binary" "$_tmm" '/usr/local/bin/tmux'
+has_txt "the mismatch text names the misleading symptom" "$_tmm" 'server exited unexpectedly'
 
 _delivered() { ( _paste_verified() { printf '%s' "$2"; }; _deliver pane "$1" "$2" ) }
 eq "claude leading slash is space-guarded"  " /clear"  "$(_delivered claude '/clear')"

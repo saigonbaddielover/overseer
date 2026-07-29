@@ -43,6 +43,12 @@ server-side.
 - **tmux** — a Linux target must run inside tmux (a plain PTY can't be driven; the kernel blocks
   keystroke injection and the screen buffer lives client-side). Windows targets use the broker
   instead — see [docs/WINDOWS.md](docs/WINDOWS.md) for its prerequisites and security model.
+  No version is pinned: overseer always calls whichever `tmux` is on `PATH` and never a fixed path, so
+  it follows yours. What *does* matter is that a tmux client can only talk to a server started from a
+  build of the same protocol version — so if a machine has two tmux installs (say `/usr/bin/tmux` 3.4
+  and `/usr/local/bin/tmux` 3.6a), commands run through the wrong one fail with `server exited
+  unexpectedly`, which reads like the server died when it is fine. `overseer doctor` compares the two
+  and names them.
 - **jq** — for transcript reading.
 - **ssh** — required by the remote `on`/`deploy` commands and all `win <host> <verb>`. **tar** — by
   `deploy` only (it ships `scripts/` over ssh + tar). **scp, base64, iconv** — by the Windows `win`

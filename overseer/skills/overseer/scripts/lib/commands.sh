@@ -689,6 +689,16 @@ cmd_menu() {
   _is_active "$pane" "$name" && { printf 'active: %s (pane %s)\n' "$name" "$pane"; return 0; }
   _die "could not make '$name' active (cycled the whole view without it becoming highlighted — is it an item here? try: overseer peek raw $target)"
 }
+_tmux_server_pid() {
+  local p
+  p=$(tmux display-message -p '#{pid}' 2>/dev/null) && [ -n "$p" ] && { printf '%s' "$p"; return 0; }
+  pgrep -u "$(id -u)" -x 'tmux: server' 2>/dev/null | head -1
+}
+_tmux_mismatch() { [ -n "$1" ] && [ -n "$2" ] && [ "$1" != "$2" ]; }
+_tmux_mismatch_text() {
+  printf 'two tmux builds on this machine: PATH resolves to %s (%s), the running server was started from %s. A tmux client only speaks to a server of its own protocol version, so calling the other path fails with "server exited unexpectedly" — which reads like the server died. overseer always uses whichever tmux is on PATH; keep scripts and shells on that one' \
+    "$1" "$2" "$3"
+}
 _doctor_probe() {
   local kind="$1" jl rc n
   jl=$(_probe_contract "$kind") && rc=0 || rc=$?
@@ -924,7 +934,17 @@ cmd_doctor() {
   else
     printf '  [warn] claude CLI not on PATH — cannot drive claude panes\n'
   fi
-  if tmux info >/dev/null 2>&1; then printf '  [ok]   tmux server running\n'; else printf '  [warn] no tmux server yet (start a tmux session to drive)\n'; fi
+  local spid sexe cexe
+  spid=$(_tmux_server_pid) || spid=''
+  if tmux info >/dev/null 2>&1; then printf '  [ok]   tmux server running\n'
+  elif [ -n "$spid" ]; then
+    printf '  [FAIL] a tmux server is running (pid %s) but this tmux cannot reach it\n' "$spid"; bad=1
+  else printf '  [warn] no tmux server yet (start a tmux session to drive)\n'; fi
+  if [ -n "$spid" ]; then
+    sexe=$(readlink -f "/proc/$spid/exe" 2>/dev/null) || sexe=''
+    cexe=$(readlink -f "$(command -v tmux 2>/dev/null)" 2>/dev/null) || cexe=''
+    _tmux_mismatch "$cexe" "$sexe" && printf '  [warn] %s\n' "$(_tmux_mismatch_text "$cexe" "$(tmux -V 2>/dev/null)" "$sexe")"
+  fi
   if [ -d "$CLAUDE_HOME/sessions" ] && ls "$CLAUDE_HOME"/sessions/*.json >/dev/null 2>&1; then
     n=$(ls "$CLAUDE_HOME"/sessions/*.json 2>/dev/null | wc -l)
     printf '  [ok]   Claude session state found (%s/sessions/*.json: %s)\n' "$CLAUDE_HOME" "$n"
