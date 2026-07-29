@@ -1,0 +1,3 @@
+{"type":"user","sessionId":"q-1","origin":{"kind":"human"},"message":{"content":"first prompt"}}
+{"type":"queue-operation","operation":"enqueue","timestamp":"2026-07-28T09:56:09.783Z","sessionId":"q-1","content":"the queued follow-up"}
+{"type":"queue-operation","operation":"dequeue","timestamp":"2026-07-28T09:57:01.010Z","sessionId":"q-1"}

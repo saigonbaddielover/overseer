@@ -5,6 +5,35 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.40.0] - 2026-07-29
+
+### Added
+
+- **`unsend <target>` — retract a message queued behind a running turn, before it runs.** A `send` or
+  `chat` onto a busy agent is queued, and until now nothing could take it back: a dispatcher whose
+  plan changed mid-flight had to sit in a poll loop waiting for the queue to drain just to send a
+  "stop", and meanwhile the stale task was still going to run. `unsend` pulls the message back out of
+  the queue, prints what it dropped, and clears the input box; the running turn is untouched. It also
+  frees the one queue slot, so the refusal on a second `send` is no longer a dead end — both that
+  refusal and the `QUEUED` notice now point at it.
+
+  Retracting is verified against the transcript, not the screen: Claude records every queue change as
+  a `queue-operation` (`enqueue` / `dequeue` / `popAll`), so `unsend` knows a message is really queued
+  even when a half-typed draft hides the on-screen hint, and it can tell "pulled it back" (`popAll`)
+  from "too late, it started running" (`dequeue`) instead of reporting a false success.
+
+  **Codex is refused, with the reason.** A message sent to a busy Codex is handed to the model
+  immediately as a *steer* — it is already in flight and no keystroke pulls it back. `unsend` says so
+  rather than pretending; only Codex's genuinely retractable queues (`Queued follow-up inputs`,
+  `Messages to be submitted at end of turn`) are acted on.
+
+### Fixed
+
+- The input box read as non-empty when Claude drew a dim ghost placeholder that begins with an SGR
+  reset (`ESC[2m ESC[39m Press up to edit queued messages`) — the ghost stripper assumed the text
+  followed `ESC[2m` directly, so it left the placeholder behind. Every box-clearing path (`send`,
+  `chat`, `unsend`) then failed on a box that was in fact empty.
+
 ## [0.39.0] - 2026-07-28
 
 ### Changed

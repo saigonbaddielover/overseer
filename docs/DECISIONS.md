@@ -512,3 +512,37 @@ percentage because its rollout carries `model_context_window`.
 An account with no OAuth credentials at all — a third-party backend, Bedrock/Vertex/an API key/a
 proxy — is detected by that absence and reported as `quota n/a`, which is a cleaner signal than the
 statusline route's "no `rate_limits` field" ever was.
+
+## ADR-0010 — A queued message stays retractable, and the transcript says whether it is
+
+**Context.** `send`/`chat` onto a busy agent queue the message, and overseer caps that at one queued
+message per agent. A dispatcher whose plan changes mid-flight — a worker turns out to be doing the
+same work, an instruction was wrong — had no way to take it back. The observed workaround was a
+background loop that retried a "stop" message every 20s until the slot freed, which wastes the minutes
+that matter and still lets the stale task start.
+
+**Decision.** Add `unsend <target>`: pull the queued message back out of the queue, print it, clear the
+input box, leave the running turn alone. Both the `QUEUED` notice and the one-slot refusal point at it,
+so the dead end becomes a two-command fix.
+
+**Why the transcript decides, not the screen.** Claude records every queue change as a
+`queue-operation` record — `enqueue` with the text, `dequeue` when it starts running, `popAll` when it
+is pulled back into the composer. That gives two things the screen cannot:
+
+- The on-screen hint (`Press up to edit queued messages`) is a *placeholder*, so it vanishes the moment
+  anything is typed into the box. A queued message behind a half-typed draft is invisible to the screen
+  check and plainly visible in the transcript.
+- After pressing the pop key, `popAll` means "retracted" and `dequeue` means "too late, it started
+  running". Without that, an `Up` arriving a moment late pulls *prompt history* into the box and looks
+  exactly like a successful retract. Reporting a false success here is worse than failing.
+
+**Why Codex is refused rather than approximated.** Codex does not queue a mid-turn message; it hands it
+to the model as a *steer* the moment it is submitted (`pending_steers`, rendered as "Messages to be
+submitted after next tool call"). `pop_latest_queued_composer_state` only pops `queued_user_messages`
+and `rejected_steers_queue`, so no keystroke pulls a steer back — verified live against codex-cli
+0.145.0. `unsend` therefore acts only on Codex's genuinely retractable sections and refuses the steer
+with that explanation. Pretending would be the same false success the transcript check exists to avoid.
+
+**Cost.** Two harness-specific screen strings for Codex, and a `_realtext` fix that the queued
+placeholder exposed: Claude emits the ghost as `ESC[2m ESC[39m text`, and the stripper had assumed the
+text followed `ESC[2m` directly, so every box-clearing path failed on an empty box in that state.

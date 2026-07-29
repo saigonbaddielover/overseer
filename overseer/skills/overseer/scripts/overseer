@@ -54,6 +54,7 @@ main() {
     peek) cmd_peek "$@" ;;
     keys) cmd_keys "$@" ;;
     send) cmd_send "$@" ;;
+    unsend) cmd_unsend "$@" ;;
     chat) cmd_chat "$@" ;;
     wait) cmd_wait "$@" ;;
     fleet) cmd_fleet "$@" ;;
@@ -81,6 +82,7 @@ main() {
       printf '  chat  [--yes] <t> <msg|-> [timeout]  agent: send, wait for the reply, print it (queues behind a busy/compacting agent, waits for ITS OWN turn)\n'
       printf '  send  [--yes] [--notify] <t> <msg|-> [notify_timeout]  agent: paste + verify + submit, confirm the turn started (no reply wait); queues + says so if the agent is busy/compacting\n'
       printf '        --notify also arms a detached watcher: when that agent leaves its turn (done / stopped at a prompt / died) it PASTES a wake-up into the pane you ran this from, so a dispatcher does not have to sit and poll\n'
+      printf '  unsend <t>                 agent: RETRACT the message queued behind the running turn, before it runs (claude only — codex hands a mid-turn message straight to the model as a steer, which nothing can pull back)\n'
       printf '  wait  <t> [timeout]        agent: block until the turn finishes\n'
       printf '  fleet [--hosts|--tailscale [--os NAME]] [-u USER] [status|read|wait [--any]|send [--notify]|chat] [args]  every LOCAL agent pane at once (default status; send/chat broadcast); with --hosts/--tailscale also fan out over the inventory hosts (each runs "on <host> fleet")\n'
       printf '        wait fans a per-pane wait over all panes; wait --any returns as soon as the FIRST in-flight pane finishes/awaits/exits (for a poll loop); send --notify arms one watcher per pane instead, so you go idle and get woken. a fleet-wide send/chat first PREVIEWS which idle agents would receive it and asks once before sending; --dry-run stops after the preview, --yes skips it (scripts)\n'

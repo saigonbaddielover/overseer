@@ -86,6 +86,26 @@ _queued() {
   cap=$(tmux capture-pane -p -t "$pane" 2>/dev/null) || return 1
   _queued_text "$cap"
 }
+_cx_queued_text() {
+  printf '%s\n' "$1" | awk '
+    /^[[:space:]]*›/ { keep = 0 }
+    /^[[:space:]]*•[[:space:]]/ {
+      keep = (index($0, "Queued follow-up inputs") > 0) || (index($0, "Messages to be submitted at end of turn") > 0)
+      next
+    }
+    keep && /↳/ { s = $0; sub(/^.*↳/, "", s); sub(/^[[:space:]]+/, "", s); sub(/[[:space:]]+$/, "", s); if (s != "") print s }'
+}
+_cx_queued() {
+  local pane="$1" cap
+  cap=$(tmux capture-pane -p -t "$pane" 2>/dev/null) || return 1
+  _cx_queued_text "$cap"
+}
+_cx_steering_text() { printf '%s\n' "$1" | grep -qE '•[[:space:]]+Messages to be submitted after next tool call'; }
+_cx_steering() {
+  local pane="$1" cap
+  cap=$(tmux capture-pane -p -t "$pane" 2>/dev/null) || return 1
+  _cx_steering_text "$cap"
+}
 _screen_state() {
   local pane="$1" cap cy
   cap=$(tmux capture-pane -p -t "$pane" 2>/dev/null) || { printf 'busy'; return 0; }
@@ -120,9 +140,10 @@ _inline() {
 }
 # real (non-ghost) typed text: drop dim ghost spans, color codes, prompt glyph (claude ❯ or codex ›),
 # NBSP; trim
-_realtext() {
-  _inline "$1" | sed -E $'s/\x1b\\[2m[^\x1b]*//g; s/\x1b\\[[0-9;]*m//g; s/^[^❯›]*[❯›]//; s/\xc2\xa0/ /g; s/^[[:space:]]+//; s/[[:space:]]+$//'
+_realtext_of() {
+  printf '%s\n' "$1" | sed -E $'s/\x1b\\[2m(\x1b\\[[0-9;]*m)*[^\x1b]*//g; s/\x1b\\[[0-9;]*m//g; s/^[^❯›]*[❯›]//; s/\xc2\xa0/ /g; s/^[[:space:]]+//; s/[[:space:]]+$//'
 }
+_realtext() { _realtext_of "$(_inline "$1")"; }
 # strip leading/trailing whitespace, matching what _realtext does to the rendered box, so a
 # delivery-only leading space (added to dodge command mode) never fails the equality check.
 _trim() { local s="$1"; s="${s#"${s%%[![:space:]]*}"}"; s="${s%"${s##*[![:space:]]}"}"; printf '%s' "$s"; }

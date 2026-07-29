@@ -1,0 +1,11 @@
+  The telescope's history begins with the spectacle-makers of the Low Countries, whose lens grinding
+  had by 1600 reached a quality that made the discovery almost inevitable.
+
+• Queued follow-up inputs
+  ↳ the queued follow-up
+  ↳ a second queued line
+    shift+← edit last queued message
+
+› Improve documentation in @filename
+
+  gpt-5.6-luna medium · Context 4% used · 258K window · /workdir · Full Access

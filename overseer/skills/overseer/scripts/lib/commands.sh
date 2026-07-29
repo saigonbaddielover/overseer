@@ -106,7 +106,7 @@ cmd_send() {
   IFS=$'\t' read -r pane kind path <<< "$ctx"
   [ "$back" = "$pane" ] && _die "--notify would wake the pane it is dispatching to ($pane) — send to a different agent, or drop --notify"
   _lock_pane "$pane"
-  { _queued "$pane" && ! _compacting "$pane"; } && { _unlock_pane; _die "a message is already queued to $pane behind its running turn (the agent holds one queued message at a time) — wait for it to run first: overseer wait $target"; }
+  { _queued "$pane" && ! _compacting "$pane"; } && { _unlock_pane; _die "a message is already queued to $pane behind its running turn (the agent holds one queued message at a time) — wait for it to run first: overseer wait $target, or drop it and free the slot: overseer unsend $target"; }
   local base; base=$(_h_turn_count "$kind" "$path" 2>/dev/null); base="${base:-0}"
   local bbytes; bbytes=$(_fsize "$path")
   local prequeue=0; { { [ -n "$path" ] && [ -f "$path" ] && _h_running "$kind" "$path"; } || _compacting "$pane"; } && prequeue=1
@@ -122,7 +122,7 @@ cmd_send() {
   _unlock_pane
   if [ "$prequeue" = 1 ]; then
     local why="busy with its current turn"; _compacting "$pane" && why="compacting its context"
-    printf 'sent to %s (QUEUED — the agent is %s):\n%s\naccepted and will run when the agent is free; await the reply: overseer wait %s [timeout]\n' "$pane" "$why" "$msg" "$target"
+    printf 'sent to %s (QUEUED — the agent is %s):\n%s\naccepted and will run when the agent is free; await the reply: overseer wait %s [timeout] — or drop it before it runs: overseer unsend %s\n' "$pane" "$why" "$msg" "$target" "$target"
     if [ "$notify" = 1 ]; then _notify_spawn "$pane" "$kind" "$back" "$ntimeout" 1; fi
     return 0
   fi
@@ -132,12 +132,45 @@ cmd_send() {
   if [ "$notify" = 1 ] && [ "$rc" != 2 ]; then _notify_spawn "$pane" "$kind" "$back" "$ntimeout" "$started"; fi
   case "$rc" in
     5|4) local why="busy with its current turn"; _compacting "$pane" && why="compacting its context"
-       printf 'sent to %s (QUEUED — the agent is %s):\n%s\naccepted and will run when the agent is free; await the reply: overseer wait %s [timeout]\n' "$pane" "$why" "$msg" "$target" ;;
+       printf 'sent to %s (QUEUED — the agent is %s):\n%s\naccepted and will run when the agent is free; await the reply: overseer wait %s [timeout] — or drop it before it runs: overseer unsend %s\n' "$pane" "$why" "$msg" "$target" "$target" ;;
     2) printf 'sent to %s:\n%s\n' "$pane" "$msg"; _report_awaiting "$pane" "$target" ;;
     1) printf 'sent to %s:\n%s\n' "$pane" "$msg"
        _die "could not confirm the turn started within 10s — the message may still be sitting in the input box; peek: overseer peek $target" ;;
     *) printf 'sent to %s (turn started):\n%s\n' "$pane" "$msg" ;;
   esac
+}
+cmd_unsend() {
+  _need tmux; _need jq
+  local target="${1:-}"
+  [ -n "$target" ] || _die "usage: overseer unsend <pane|session>"
+  local ctx pane kind path; ctx=$(_target_ctx "$target") || _die "no agent pane (claude/codex) for target: $target (if the session is split, target the pane id %N — see: overseer list)"
+  IFS=$'\t' read -r pane kind path <<< "$ctx"
+  _lock_pane "$pane"
+  local q; q=$(_h_queued "$kind" "$path" "$pane")
+  if [ -z "$q" ]; then
+    _h_steering "$kind" "$path" "$pane" && { _unlock_pane; _die "nothing retractable on $pane — codex hands a message sent mid-turn straight to the model as a steer, so it is already in flight and no key pulls it back; let the turn finish and correct it in the next message: overseer wait $target"; }
+    _unlock_pane
+    printf 'nothing queued on %s — nothing to retract\n' "$pane"
+    return 0
+  fi
+  _awaiting "$pane" >/dev/null && { _unlock_pane; _die "$pane is stopped at an interactive prompt, and unsend drives the same keys that move its selection — answer it first: overseer peek $target"; }
+  local draft; draft=$(_realtext "$pane")
+  _clear_box "$pane" || { _unlock_pane; _die "could not empty the input box on $pane before retracting — peek: overseer peek $target"; }
+  tmux send-keys -t "$pane" "$(_h_popkey "$kind")"
+  local i
+  for i in $(seq 1 40); do
+    _h_unqueued "$kind" "$path" "$pane" && break
+    _nap
+  done
+  _h_unqueued "$kind" "$path" "$pane" || {
+    _clear_box "$pane" || true; _unlock_pane
+    _die "could not pull the queued message back out of $pane — the agent may have finished its turn and started running it already; check it: overseer peek $target"
+  }
+  _clear_box "$pane" || { _unlock_pane; _die "pulled the message off the queue but could not clear it out of the input box on $pane — it is unsubmitted, clear it yourself: overseer peek $target"; }
+  _unlock_pane
+  printf 'retracted from %s (never ran):\n%s\n' "$pane" "$q"
+  [ -n "$draft" ] && printf 'also discarded the unsent draft that was sitting in the input box:\n%s\n' "$draft"
+  return 0
 }
 # send + wait for the turn to finish + print the reply (the human round-trip).
 cmd_chat() {
@@ -152,7 +185,7 @@ cmd_chat() {
   local ctx pane kind path; ctx=$(_target_ctx "$target") || _die "no agent pane (claude/codex) for target: $target (if the session is split, target the pane id %N — see: overseer list)"
   IFS=$'\t' read -r pane kind path <<< "$ctx"
   _lock_pane "$pane"
-  { _queued "$pane" && ! _compacting "$pane"; } && { _unlock_pane; _die "a message is already queued to $pane behind its running turn (the agent holds one queued message at a time) — wait for it to run first: overseer wait $target"; }
+  { _queued "$pane" && ! _compacting "$pane"; } && { _unlock_pane; _die "a message is already queued to $pane behind its running turn (the agent holds one queued message at a time) — wait for it to run first: overseer wait $target, or drop it and free the slot: overseer unsend $target"; }
   local has_tx=0; { [ -n "$path" ] && [ -f "$path" ]; } && has_tx=1
 
   local sid='' base=0 since bbytes='' prequeue=0
