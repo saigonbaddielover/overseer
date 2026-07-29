@@ -8,3 +8,4 @@
 # local-only working notes + Claude Code project config (machine-specific); not shipped with the plugin
 CLAUDE.md
 .claude/
+.claude/worktrees/
