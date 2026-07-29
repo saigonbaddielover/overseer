@@ -376,6 +376,13 @@ Codex needs none of this: it writes `rate_limits` into every rollout already.
   `~/.claude/projects/*/*.jsonl`) and Codex (`~/.codex/sessions/**/rollout-*.jsonl`) — undocumented and
   may change between releases. If a release breaks discovery, open an issue.
 - The target program must run **inside tmux**.
+- **overseer never drives the pane it is running in.** `send chat keys sh slash menu wait quit stop
+  unsend interrupt` all refuse `$TMUX_PANE` (compared against the *resolved* pane, so a session name
+  cannot slip past), and `fleet` skips it with a printed note instead of failing on it. Read-only
+  commands (`list`, `read`, `peek`, `fleet status`, `fleet read`) still include it. Every refused case is
+  guaranteed broken, not merely odd: a message pasted into your own composer wipes what was half-typed
+  there and then queues behind the turn that pasted it, `wait` on yourself can only end after it returns,
+  and `fleet interrupt` would otherwise stop the dispatcher itself.
 - **Awaiting-input detection covers numbered menus** — a cursor (`❯`/`›`) on **one** of **two or more**
   numbered options, which is how Claude and Codex render permission/approval and most select prompts.
   The cursor must sit on exactly *some* of the options, not all: a real menu marks only the selected

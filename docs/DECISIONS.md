@@ -582,3 +582,30 @@ claims to be running could be vetoed by a still screen, on the theory that Codex
 `turn_aborted`. That was a misdiagnosis — the pane was genuinely still generating. Codex does record
 `turn_aborted` on a real interrupt, and the change was reverted: the fast path stays, and the screen
 veto stays Claude-only where ADR-0006 put it.
+
+## ADR-0012 — overseer never drives the pane it is running in
+
+**Context.** `stop` had refused its own pane since it was written; nothing else did. Shipping
+`interrupt` (ADR-0011) made the omission expensive: `overseer interrupt %N` aimed at the dispatcher's
+own pane sends Escape into the very turn that is running the command, and `fleet interrupt` — a
+fan-out whose target list is *every* agent pane — necessarily included the dispatcher, so the one
+command written to stop runaway workers would stop the agent issuing it. 0.41.1 patched the two new
+verbs. The same hole was still open in the older ones.
+
+**Decision.** Self-targeting is refused by every command that types into, blocks on, or kills a pane —
+`send chat keys sh slash menu wait quit stop unsend interrupt` — through one predicate, `_self_pane`
+(`$TMUX_PANE` vs. the **resolved** pane, so a session name cannot slip past a `%N` comparison), and one
+message helper, `_no_self`. `fleet` filters the caller out of the fan-out with a printed skip line
+rather than letting the per-pane command fail. Read-only commands (`list read peek`, `fleet status`,
+`fleet read`) still include it: observing yourself is meaningful, driving yourself is not.
+
+**Why refuse rather than let it fail.** Each of these is not merely odd but *guaranteed* broken, and
+broken in a way that costs the caller its whole timeout or its own state: a message pasted into your own
+composer clears whatever was half-typed there and then queues behind the turn that pasted it; `wait` on
+yourself cannot return until a turn ends that cannot end until `wait` returns; `sh` types into the shell
+that is running `sh`; `quit` kills the agent mid-command. There is no reading of any of them that a
+caller could have wanted, so a fast, explanatory refusal is strictly better than a timeout.
+
+**One consequence.** `send --notify`'s bespoke "would wake the pane it is dispatching to" check became
+unreachable — the general guard fires first and says the same thing — so it was deleted rather than left
+as dead code that looks live.

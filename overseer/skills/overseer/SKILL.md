@@ -382,6 +382,11 @@ WHOLE thing, do not stop at the first screen. The reliable loop:
   text, so a suggestion can never be mistaken for, or mixed into, your message. This is about the box,
   not about busy/idle.
 - **A non-breaking space (U+00A0) sits between `❯` and the text** — normalized before comparing.
+- **You cannot drive your own pane.** `send chat keys sh slash menu wait quit stop unsend interrupt`
+  refuse `$TMUX_PANE`, and `fleet` skips it with a printed note — so a fleet-wide `interrupt` or `wait`
+  never stops or blocks on the agent issuing it. `list`/`read`/`peek`/`fleet status` still include it.
+  If you need to act on yourself, do it directly (answer in your own reply, use your own tools) — there
+  is no flag to override this.
 - **The TUI renders with lag**: wait for a *specific condition* (the text appearing), never for
   "the screen stopped changing" — two identical captures usually mean "still stale", not "done".
 - **The user scrolling the pane up** (tmux copy-mode) would otherwise freeze capture on the scrolled
