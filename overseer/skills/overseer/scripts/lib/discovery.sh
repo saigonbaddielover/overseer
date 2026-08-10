@@ -63,8 +63,11 @@ _peer_name_of() {
 _peer_ambiguous() {
   _die "'$1' names more than one live claude session — target the one you mean by its pane id %N (see: overseer list)"
 }
+_peer_no_pane() {
+  _die "'$1' is a live claude session with no tmux pane, so overseer cannot drive it — reach it on the harness peer channel with the SendMessage tool ({\"to\": \"$1\", ...}); see: overseer list"
+}
 _pane_by_peer_name() {
-  local f name sock tgt hit='' n=0
+  local f name sock tgt hit='' n=0 nopane=0
   command -v jq >/dev/null 2>&1 || return 1
   for f in "$CLAUDE_HOME"/sessions/*.json; do
     [ -f "$f" ] || continue
@@ -73,12 +76,33 @@ _pane_by_peer_name() {
     sock=$(jq -r '.messagingSocketPath // empty' "$f" 2>/dev/null)
     _peer_live "$sock" || continue
     tgt=$(jq -r '.tmux // empty' "$f" 2>/dev/null)
-    [ -n "$tgt" ] || continue
+    if [ -z "$tgt" ]; then nopane=$((nopane + 1)); continue; fi
     hit="${tgt##*.}"; n=$((n + 1))
   done
   [ "$n" -le 1 ] || return 2
-  [ -n "$hit" ] || return 1
-  printf '%s' "$hit"
+  [ -n "$hit" ] && { printf '%s' "$hit"; return 0; }
+  [ "$nopane" = 0 ] || return 3
+  return 1
+}
+_target_die() {
+  local target="$1" generic="$2" rc=0
+  _pane_by_peer_name "$target" >/dev/null 2>&1 || rc=$?
+  if [ "$rc" = 2 ]; then _peer_ambiguous "$target"; fi
+  if [ "$rc" = 3 ]; then _peer_no_pane "$target"; fi
+  _die "$generic"
+}
+_peer_sessions() {
+  local f name sock cwd
+  command -v jq >/dev/null 2>&1 || return 0
+  for f in "$CLAUDE_HOME"/sessions/*.json; do
+    [ -f "$f" ] || continue
+    name=$(jq -r '.name // empty' "$f" 2>/dev/null) || continue
+    [ -n "$name" ] || continue
+    sock=$(jq -r '.messagingSocketPath // empty' "$f" 2>/dev/null)
+    _peer_live "$sock" || continue
+    cwd=$(jq -r '.cwd // empty' "$f" 2>/dev/null)
+    printf '%s\t%s\n' "$name" "${cwd:-?}"
+  done
 }
 _is_shell() {
   case "$1" in
@@ -201,7 +225,7 @@ _target_ctx() {
 # unlike _resolve, not restricted to claude panes — used by peek/keys/sh.
 _resolve_pane() {
   local p rc=0; p=$(_pane_by_peer_name "$1") || rc=$?
-  if [ "$rc" = 2 ]; then _peer_ambiguous "$1"; fi
+  case "$rc" in 2|3) return 1 ;; esac
   [ -n "$p" ] || p=$(tmux display-message -p -t "$1" '#{pane_id}' 2>/dev/null) || return 1
   [ -n "$p" ] && printf '%s' "$p"
 }

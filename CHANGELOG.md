@@ -5,6 +5,29 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.44.0] - 2026-08-10
+
+### Added
+
+- **`list` is the whole picture, not just the drivable part.** It now also lists a live claude that
+  has **no tmux pane** — one the harness can address but overseer cannot drive — and a **`REACH`**
+  column saying which channels a row answers on: `keys+peer`, `keys` (Codex or an unnamed pane), or
+  `peer`. Targeting a `peer`-only row no longer fails with "no tmux pane": it names the session and
+  points at the `SendMessage` tool, so the harness listing and overseer's listing agree on who
+  exists and differ only on who can be driven.
+- **A keystroke delivery carries its own provenance and a reply address.** The prefix already named
+  the sender; it now also states that the sender is another agent rather than the user and that the
+  message is not an approval to act, and tells the receiver how to answer — `SendMessage` when the
+  target has a PEER name of its own, `overseer send <sender>` when it does not (Codex, a shell, a
+  Windows broker). This is the harness's own peer-message guardrail, reduced to one line, carried
+  onto the one path that cannot have the real thing.
+
+### Changed
+
+- **A failed target resolution says what is actually wrong.** `_target_die` classifies the name
+  before repeating the generic error, so an ambiguous name and a live-but-undrivable session each
+  get their own message instead of "no tmux pane for target: …".
+
 ## [0.43.0] - 2026-08-10
 
 ### Changed
