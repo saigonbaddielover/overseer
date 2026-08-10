@@ -47,6 +47,32 @@ _harness_of() {
   _codex_pid "$1" >/dev/null 2>&1 && { printf codex; return 0; }
   return 1
 }
+_peer_field() {
+  command -v jq >/dev/null 2>&1 || return 1
+  jq -r --arg f "$2" '.[$f] // empty' "$CLAUDE_HOME/sessions/$1.json" 2>/dev/null
+}
+_peer_name_of() {
+  local apid name sock
+  apid=$(_agent_pid "$1") || return 1
+  name=$(_peer_field "$apid" name) || return 1
+  sock=$(_peer_field "$apid" messagingSocketPath) || return 1
+  [ -n "$name" ] && [ -n "$sock" ] && [ -S "$sock" ] || return 1
+  printf '%s' "$name"
+}
+_pane_by_peer_name() {
+  local f name tgt
+  command -v jq >/dev/null 2>&1 || return 1
+  for f in "$CLAUDE_HOME"/sessions/*.json; do
+    [ -f "$f" ] || continue
+    name=$(jq -r '.name // empty' "$f" 2>/dev/null) || continue
+    [ "$name" = "$1" ] || continue
+    tgt=$(jq -r '.tmux // empty' "$f" 2>/dev/null)
+    [ -n "$tgt" ] || continue
+    printf '%s' "${tgt##*.}"
+    return 0
+  done
+  return 1
+}
 _is_shell() {
   case "$1" in
     sh|bash|zsh|fish|dash|ksh|mksh|ash|tcsh|csh|nu|xonsh|elvish) return 0 ;;
@@ -167,6 +193,7 @@ _target_ctx() {
 # resolve any target (pane id %N, or a session/window name) to the pane id tmux would act on.
 # unlike _resolve, not restricted to claude panes — used by peek/keys/sh.
 _resolve_pane() {
-  local p; p=$(tmux display-message -p -t "$1" '#{pane_id}' 2>/dev/null) || return 1
+  local p; p=$(tmux display-message -p -t "$1" '#{pane_id}' 2>/dev/null) || p=''
+  [ -n "$p" ] || p=$(_pane_by_peer_name "$1") || return 1
   [ -n "$p" ] && printf '%s' "$p"
 }
