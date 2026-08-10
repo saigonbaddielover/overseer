@@ -10,8 +10,27 @@ cmd_list() {
     done < <(tmux list-panes -a -F '#{session_name}	#{pane_id}	#{pane_pid}	#{pane_current_command}' 2>/dev/null)
     return
   fi
-  printf 'SESSION\tPANE\tPANE_PID\tHARNESS\tCWD\n'
-  _panes
+  printf 'SESSION\tPANE\tPANE_PID\tHARNESS\tCWD\tPEER\n'
+  local s pid_id pp kind cwd peer
+  while IFS=$'\t' read -r s pid_id pp kind cwd; do
+    peer=$(_peer_name_of "$pp") || peer='-'
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$s" "$pid_id" "$pp" "$kind" "$cwd" "$peer"
+  done < <(_panes)
+}
+_self_peer_name() {
+  [ -n "${TMUX_PANE:-}" ] || return 1
+  local pp; pp=$(tmux display-message -p -t "$TMUX_PANE" '#{pane_pid}' 2>/dev/null) || return 1
+  _peer_name_of "$pp"
+}
+_stamp_from() {
+  local me; me=$(_self_peer_name) || { printf '%s' "$1"; return 0; }
+  case "$1" in "[from: $me]"*) printf '%s' "$1" ;; *) printf '[from: %s] %s' "$me" "$1" ;; esac
+}
+_peer_guard() {
+  local pane="$1" target="$2" pp name
+  pp=$(tmux display-message -p -t "$pane" '#{pane_pid}' 2>/dev/null) || return 0
+  name=$(_peer_name_of "$pp") || return 0
+  _die "$target is reachable on the harness peer channel as '$name' — deliver it with the SendMessage tool instead ({\"to\": \"$name\", ...}), which the receiver records as an authenticated peer message carrying its own guardrails; typing into its pane is recorded as if user typed it, so the receiver cannot tell an agent from its user. Pass --force-keys to take the keystroke path anyway."
 }
 cmd_read() {
   _need tmux; _need jq
@@ -93,10 +112,10 @@ _notify_spawn() {
 }
 cmd_send() {
   _need tmux
-  local confirm=1 notify=0
-  while :; do case "${1:-}" in --yes) confirm=0; shift ;; --notify) notify=1; shift ;; *) break ;; esac; done
+  local confirm=1 notify=0 forcekeys=0
+  while :; do case "${1:-}" in --yes) confirm=0; shift ;; --notify) notify=1; shift ;; --force-keys) forcekeys=1; shift ;; *) break ;; esac; done
   local target="${1:-}" msg
-  [ -n "$target" ] || _die "usage: overseer send [--yes] [--notify] <pane|session> <message|-> [notify_timeout_s]"
+  [ -n "$target" ] || _die "usage: overseer send [--yes] [--notify] [--force-keys] <pane|session> <message|-> [notify_timeout_s]"
   msg=$(_read_msg "${2:-}")
   [ -n "$msg" ] || _die "usage: overseer send [--yes] [--notify] <pane|session> <message|-> [notify_timeout_s]  (empty message)"
   local ntimeout="${3:-$DEFAULT_TIMEOUT}" back=''
@@ -106,6 +125,8 @@ cmd_send() {
   local ctx pane kind path; ctx=$(_target_ctx "$target") || _die "no agent pane (claude/codex) for target: $target (if the session is split, target the pane id %N — see: overseer list)"
   IFS=$'\t' read -r pane kind path <<< "$ctx"
   _no_self "$pane" "send to"
+  [ "$forcekeys" = 1 ] || _peer_guard "$pane" "$target"
+  msg=$(_stamp_from "$msg")
   _lock_pane "$pane"
   { _queued "$pane" && ! _compacting "$pane"; } && { _unlock_pane; _die "a message is already queued to $pane behind its running turn (the agent holds one queued message at a time) — wait for it to run first: overseer wait $target, or drop it and free the slot: overseer unsend $target"; }
   local base; base=$(_h_turn_count "$kind" "$path" 2>/dev/null); base="${base:-0}"
@@ -232,16 +253,18 @@ to interrupt and let it run: overseer interrupt --run-queued $target"
 # send + wait for the turn to finish + print the reply (the human round-trip).
 cmd_chat() {
   _need tmux; _need jq
-  local confirm=1
-  while :; do case "${1:-}" in --yes) confirm=0; shift ;; *) break ;; esac; done
+  local confirm=1 forcekeys=0
+  while :; do case "${1:-}" in --yes) confirm=0; shift ;; --force-keys) forcekeys=1; shift ;; *) break ;; esac; done
   local target="${1:-}" msg
-  [ -n "$target" ] || _die "usage: overseer chat [--yes] <pane|session> <message|-> [timeout_s]"
+  [ -n "$target" ] || _die "usage: overseer chat [--yes] [--force-keys] <pane|session> <message|-> [timeout_s]"
   msg=$(_read_msg "${2:-}")
-  [ -n "$msg" ] || _die "usage: overseer chat [--yes] <pane|session> <message|-> [timeout_s]  (empty message)"
+  [ -n "$msg" ] || _die "usage: overseer chat [--yes] [--force-keys] <pane|session> <message|-> [timeout_s]  (empty message)"
   local timeout="${3:-$DEFAULT_TIMEOUT}"; _uint "$timeout"
   local ctx pane kind path; ctx=$(_target_ctx "$target") || _die "no agent pane (claude/codex) for target: $target (if the session is split, target the pane id %N — see: overseer list)"
   IFS=$'\t' read -r pane kind path <<< "$ctx"
   _no_self "$pane" "chat with"
+  [ "$forcekeys" = 1 ] || _peer_guard "$pane" "$target"
+  msg=$(_stamp_from "$msg")
   _lock_pane "$pane"
   { _queued "$pane" && ! _compacting "$pane"; } && { _unlock_pane; _die "a message is already queued to $pane behind its running turn (the agent holds one queued message at a time) — wait for it to run first: overseer wait $target, or drop it and free the slot: overseer unsend $target"; }
   local has_tx=0; { [ -n "$path" ] && [ -f "$path" ]; } && has_tx=1

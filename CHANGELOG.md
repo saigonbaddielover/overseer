@@ -5,6 +5,30 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.42.0] - 2026-08-10
+
+### Added
+
+- **`list` shows a `PEER` column, and a target may be given by that name.** Claude Code records each
+  live session in `~/.claude/sessions/<pid>.json` with a `name` and a `messagingSocketPath`; that name
+  is the address its own agent-to-agent channel uses. overseer already read that file for pane
+  discovery, so it now surfaces the name (`-` when the session exposes none) and resolves a target by
+  it, which means one vocabulary across `overseer`, `ListAgents` and `SendMessage`.
+
+### Changed
+
+- **`chat`/`send` refuse a target that is reachable on the harness peer channel.** A keystroke
+  delivery is recorded on the receiving side as `origin.kind=human` with `promptSource=typed` — a
+  message from another agent is indistinguishable from one the user typed, and none of the harness's
+  peer guardrails attach to it. The two verbs now name the target's `PEER` name and point at the
+  `SendMessage` tool, which the receiver records as an authenticated peer message (`origin.kind=peer`
+  with a `verifiedPeerPid`). `--force-keys` takes the keystroke path anyway, for the cases that need
+  the keyboard.
+- **Every keystroke delivery carries the sender's own `PEER` name.** `chat`/`send` prefix the message
+  with `[from: <name>]` when overseer runs inside a claude pane, so a Codex, shell, remote or
+  peerless target still knows who wrote to it. The prefix is a convention, not proof — only the peer
+  channel authenticates.
+
 ## [0.41.3] - 2026-07-29
 
 ### Added
