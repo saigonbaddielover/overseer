@@ -34,7 +34,7 @@ from stdin.
 
 | Command | Effect | Safe? |
 |---|---|---|
-| `list [--all]` | List tmux panes running an agent, led by **PEER** — the harness name a claude session is addressable by, `-` when it has none — then session, pane, pids, **HARNESS** (claude or codex) and cwd. Every command resolves that PEER name first, ahead of a `%N` or a session name. `--all` lists **every** tmux pane and its foreground command — use it to find shell panes to target. | read-only |
+| `list [--all]` | **Every agent the harness knows**, led by **PEER** — the name Claude Code itself addresses a session by, `-` when it has none — and **REACH**: `keys+peer` (a drivable pane that also answers on the peer channel), `keys` (Codex/unnamed), or `peer` (a live claude with **no tmux pane**: overseer cannot drive it, `SendMessage` is the only way in). Then session, pane, pids, **HARNESS** (claude or codex) and cwd. Every command resolves that PEER name first, ahead of a `%N` or a session name, and targeting a `peer`-only row says so instead of failing with "no tmux pane". `--all` lists **every** tmux pane and its foreground command — use it to find shell panes to target. | read-only |
 | `read <target>` | Print the last user prompt + last assistant reply from an agent's transcript (Claude `~/.claude/projects/.../<sid>.jsonl`, or Codex `~/.codex/sessions/.../rollout-*.jsonl`), auto-detected via the pane pid. | read-only |
 | `peek [raw\|-e] <target> [lines]` | Dump the pane's current screen. Plain mode drops blank lines and a trailing number caps it to the last N lines. `raw` (also `-e`/`--raw`) keeps ANSI colors so the **active tab / selected row** — a highlight invisible in plain text — is readable; `raw` always prints the whole screen and ignores `[lines]`. Any pane. | read-only |
 | `chat [--yes] [--force-keys] <target> <message\|-> [timeout]` | **Agent pane (Claude or Codex).** Send the message, **wait for the turn to finish**, then print the reply. The human round-trip. If the agent is **busy (mid-turn) or compacting**, the message is **queued** and `chat` waits for *its own* queued turn to complete — not the running one. The reply it prints is bound to *your* message (the first completed turn after your prompt, on both Claude and Codex), so it is never the running turn's reply, nor a later background/notification turn's if the agent is itself orchestrating child agents. If the agent stops at an interactive prompt (permission / plan / select menu) it returns that question + how to answer instead of hanging, and if the turn is **interrupted** it fails with "stopped without producing a reply" rather than waiting out the timeout — the message was still delivered, so `peek` before deciding to resend. | **SIDE EFFECT** |
@@ -378,9 +378,11 @@ WHOLE thing, do not stop at the first screen. The reliable loop:
    cannot tell an agent from its own user, and none of the harness's peer guardrails attach. Send it
    with the `SendMessage` tool addressed to that PEER name instead, which the receiver records as an
    authenticated peer message. `--force-keys` overrides the refusal for the cases that genuinely need
-   the keyboard, and `fleet send`/`fleet chat` take it too. Every keystroke delivery is prefixed with
-   the sender's own PEER name, so a Codex/shell/remote target still knows who wrote to it — that
-   prefix is a convention, not proof. A target driven through `on <host>` is never refused: the peer
+   the keyboard, and `fleet send`/`fleet chat` take it too. Every keystroke delivery is prefixed so a
+   Codex/shell/remote target still knows who wrote to it: the prefix names the sender, states that it
+   is an agent rather than the user and not an approval to act, and says how to reply
+   (`SendMessage` when the target has a PEER name of its own, otherwise `overseer send <sender>`) —
+   it is a convention, not proof. A target driven through `on <host>` is never refused: the peer
    channel is a unix socket under the caller's own user on the caller's own machine, so it cannot
    reach another host and the keyboard is the only path there.
 

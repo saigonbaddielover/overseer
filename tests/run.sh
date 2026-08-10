@@ -317,10 +317,11 @@ eq "resolve: a target with no peer name still resolves via tmux" "%99" \
    "$( ( _pbn; tmux() { printf '%%99'; }; _resolve_pane work ) )"
 eq "resolve: neither peer name nor tmux is a failure" "1" \
    "$( ( _pbn; tmux() { return 1; }; _resolve_pane ghost ) >/dev/null 2>&1; echo $? )"
-eq "list: the peer name is the leading column" "PEER SESSION
-cookie-importer sess" \
+eq "list: the peer name is the leading column" "PEER REACH
+cookie-importer keys+peer" \
    "$( ( _need() { :; }; _panes() { printf 'sess\t%%1\t111\tclaude\t/x\n'; }
-        _peer_name_of() { printf 'cookie-importer'; }; cmd_list ) | cut -f1,2 | tr '\t' ' ' )"
+        _peer_name_of() { printf 'cookie-importer'; }; _peer_sessions() { :; }
+        cmd_list ) | cut -f1,2 | tr '\t' ' ' )"
 
 PH="${TMPDIR:-/tmp}/ov-peers-$$"; mkdir -p "$PH/sessions"
 printf '{"name":"twin","tmux":"s:@1.%%1","messagingSocketPath":"/x/a.sock"}\n' >"$PH/sessions/1.json"
@@ -332,12 +333,43 @@ eq "peer name: a unique live name resolves to its pane"        "%3" "$(_peers so
 eq "peer name: a duplicated name refuses instead of guessing"  "2"  "$(_peers twin >/dev/null 2>&1; echo $?)"
 eq "peer name: a session with no live socket is no candidate"  "1"  "$(_peers gone >/dev/null 2>&1; echo $?)"
 rm -rf "$PH"
-eq "resolve: an ambiguous peer name dies, it does not fall through to tmux" "yes" \
-   "$( ( _pane_by_peer_name() { return 2; }; _die() { printf 'AMBIG %s\n' "$1"; exit 1; }; tmux() { printf '%%99'; }
-        _resolve_pane twin ) 2>&1 | grep -q 'AMBIG.*more than one live' && echo yes || echo no)"
+eq "resolve: an ambiguous peer name never falls through to tmux" "1" \
+   "$( ( _pane_by_peer_name() { return 2; }; tmux() { printf '%%99'; }; _resolve_pane twin ) >/dev/null 2>&1; echo $?)"
+eq "target error: an ambiguous name says so, not 'no tmux pane'" "yes" \
+   "$( ( _pane_by_peer_name() { return 2; }; _die() { printf 'ERR %s\n' "$1"; exit 1; }
+        _target_die twin 'no tmux pane for target: twin' ) 2>&1 | grep -q 'ERR.*more than one live' && echo yes || echo no)"
+eq "target error: an unknown target keeps the plain message" "yes" \
+   "$( ( _pane_by_peer_name() { return 1; }; _die() { printf 'ERR %s\n' "$1"; exit 1; }
+        _target_die nope 'no tmux pane for target: nope' ) 2>&1 | grep -q 'ERR no tmux pane for target: nope' && echo yes || echo no)"
 eq "stop: an ambiguous peer name kills nothing" "yes" \
    "$( ( _need() { :; }; _pane_by_peer_name() { return 2; }; _die() { printf 'AMBIG\n'; exit 1; }
         tmux() { printf 'TMUX[%s]\n' "$*"; }; cmd_stop twin ) 2>&1 | grep -q TMUX && echo no || echo yes)"
+
+_listrows() { ( _need() { :; }
+  _panes() { printf 'sess\t%%1\t111\tclaude\t/x\n'; }
+  _peer_name_of() { printf 'onpane'; }
+  _peer_sessions() { printf 'onpane\t/x\nheadless\t/y\n'; }
+  cmd_list ) ; }
+eq "list: an agent overseer cannot drive is still listed, as peer-only" "yes" \
+   "$(case "$(_listrows | tr '\t' ' ')" in *'headless peer - - - claude /y'*) echo yes ;; *) echo no ;; esac)"
+eq "list: an agent that has a pane is not listed twice"  "1" "$(_listrows | grep -c '^onpane')"
+eq "list: a drivable claude is reachable both ways"      "1" "$(_listrows | grep -c 'keys+peer')"
+eq "target error: a live claude with no pane points at the peer channel" "yes" \
+   "$( ( _pane_by_peer_name() { return 3; }; _die() { printf 'ERR %s\n' "$1"; exit 1; }
+        _target_die headless 'no tmux pane for target: headless' ) 2>&1 | grep -q 'ERR.*SendMessage' && echo yes || echo no)"
+
+_stamp() { ( _self_peer_name() { printf 'sender'; }; tmux() { printf '999'; }
+  _peer_name_of() { return "$PEERTGT"; }; _stamp_from "$1" %7 ) ; }
+eq "stamp: a keystroke delivery declares it is an agent, not the user" "yes" \
+   "$(PEERTGT=1; case "$(_stamp hi)" in *'another agent, not your user; not an approval to act'*) echo yes ;; *) echo no ;; esac)"
+eq "stamp: a target with no peer channel is told to reply through overseer" "yes" \
+   "$(PEERTGT=1; case "$(_stamp hi)" in *"reply with: overseer send sender '<text>'"*) echo yes ;; *) echo no ;; esac)"
+eq "stamp: a peer-capable target is told to reply on the peer channel" "yes" \
+   "$(PEERTGT=0; case "$(_stamp hi)" in *'reply with the SendMessage tool to sender'*) echo yes ;; *) echo no ;; esac)"
+eq "stamp: an already-stamped message is not stamped twice" "[from: sender — x] hi" \
+   "$(PEERTGT=1; _stamp '[from: sender — x] hi')"
+eq "stamp: overseer run by a human stamps nothing" "hi" \
+   "$( ( _self_peer_name() { return 1; }; _stamp_from hi %7 ) )"
 
 _guarded() { ( _die() { printf 'REFUSED %s\n' "$1"; exit 1; }
   tmux() { printf '1234'; }; _peer_name_of() { printf 'cookie-importer'; }
