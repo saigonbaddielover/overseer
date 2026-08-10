@@ -5,6 +5,31 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.43.0] - 2026-08-10
+
+### Changed
+
+- **The harness peer name is now the primary target vocabulary.** `_resolve_pane` — the single choke
+  point every command resolves a target through — tries the `PEER` name *before* asking tmux, so a
+  claude's own harness name wins over a tmux session that happens to share it, for every verb rather
+  than just the ones that mention it. `list` leads with the `PEER` column, `stop <peer-name>` kills
+  that agent's pane (not the whole tmux session it sits in), and `fleet` labels each section with the
+  peer name when the pane has one.
+
+### Fixed
+
+- **`fleet send`/`fleet chat` accept `--force-keys`.** They fan out to `cmd_send`/`cmd_chat`, so they
+  inherited the peer refusal added in 0.42.0 with no way past it — and the flag, being unparsed, was
+  broadcast as the message text. It is now parsed and forwarded, on the local and the `--hosts` path.
+- **A duplicated peer name is refused, not silently resolved to whichever session was read first.**
+  Names are not unique — the harness picks a fresh one per session — and now that a name outranks a
+  tmux target, guessing would drive the wrong agent. A name is also only a candidate while its
+  messaging socket is alive, so an exited session's leftover state file no longer matches.
+- **A target driven through `on <host>` is no longer refused.** The peer channel is a unix socket
+  under the caller's own user on the caller's own machine, so it cannot cross to another host: the
+  keyboard is the only path there and the refusal was pointing at a tool that could not deliver.
+  `cmd_on` marks the remote invocation and the guard stands down for it.
+
 ## [0.42.0] - 2026-08-10
 
 ### Added
