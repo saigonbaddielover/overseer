@@ -51,27 +51,34 @@ _peer_field() {
   command -v jq >/dev/null 2>&1 || return 1
   jq -r --arg f "$2" '.[$f] // empty' "$CLAUDE_HOME/sessions/$1.json" 2>/dev/null
 }
+_peer_live() { [ -n "$1" ] && [ -S "$1" ]; }
 _peer_name_of() {
   local apid name sock
   apid=$(_agent_pid "$1") || return 1
   name=$(_peer_field "$apid" name) || return 1
   sock=$(_peer_field "$apid" messagingSocketPath) || return 1
-  [ -n "$name" ] && [ -n "$sock" ] && [ -S "$sock" ] || return 1
+  [ -n "$name" ] && _peer_live "$sock" || return 1
   printf '%s' "$name"
 }
+_peer_ambiguous() {
+  _die "'$1' names more than one live claude session — target the one you mean by its pane id %N (see: overseer list)"
+}
 _pane_by_peer_name() {
-  local f name tgt
+  local f name sock tgt hit='' n=0
   command -v jq >/dev/null 2>&1 || return 1
   for f in "$CLAUDE_HOME"/sessions/*.json; do
     [ -f "$f" ] || continue
     name=$(jq -r '.name // empty' "$f" 2>/dev/null) || continue
     [ "$name" = "$1" ] || continue
+    sock=$(jq -r '.messagingSocketPath // empty' "$f" 2>/dev/null)
+    _peer_live "$sock" || continue
     tgt=$(jq -r '.tmux // empty' "$f" 2>/dev/null)
     [ -n "$tgt" ] || continue
-    printf '%s' "${tgt##*.}"
-    return 0
+    hit="${tgt##*.}"; n=$((n + 1))
   done
-  return 1
+  [ "$n" -le 1 ] || return 2
+  [ -n "$hit" ] || return 1
+  printf '%s' "$hit"
 }
 _is_shell() {
   case "$1" in
@@ -193,7 +200,8 @@ _target_ctx() {
 # resolve any target (pane id %N, or a session/window name) to the pane id tmux would act on.
 # unlike _resolve, not restricted to claude panes — used by peek/keys/sh.
 _resolve_pane() {
-  local p; p=$(tmux display-message -p -t "$1" '#{pane_id}' 2>/dev/null) || p=''
-  [ -n "$p" ] || p=$(_pane_by_peer_name "$1") || return 1
+  local p rc=0; p=$(_pane_by_peer_name "$1") || rc=$?
+  if [ "$rc" = 2 ]; then _peer_ambiguous "$1"; fi
+  [ -n "$p" ] || p=$(tmux display-message -p -t "$1" '#{pane_id}' 2>/dev/null) || return 1
   [ -n "$p" ] && printf '%s' "$p"
 }

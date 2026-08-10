@@ -310,6 +310,65 @@ rm -f "$WAF"
 eq "fleet: no-agent-panes uses a distinct sentinel (3, not the wait-timeout code)" "3" \
    "$( ( _panes() { :; }; _need() { :; }; _fleet_local status ) >/dev/null 2>&1; echo $? )"
 
+_pbn() { _pane_by_peer_name() { case "$1" in cookie-importer) printf '%%7' ;; *) return 1 ;; esac; }; }
+eq "resolve: a peer name beats a tmux target of the same name" "%7" \
+   "$( ( _pbn; tmux() { printf '%%99'; }; _resolve_pane cookie-importer ) )"
+eq "resolve: a target with no peer name still resolves via tmux" "%99" \
+   "$( ( _pbn; tmux() { printf '%%99'; }; _resolve_pane work ) )"
+eq "resolve: neither peer name nor tmux is a failure" "1" \
+   "$( ( _pbn; tmux() { return 1; }; _resolve_pane ghost ) >/dev/null 2>&1; echo $? )"
+eq "list: the peer name is the leading column" "PEER SESSION
+cookie-importer sess" \
+   "$( ( _need() { :; }; _panes() { printf 'sess\t%%1\t111\tclaude\t/x\n'; }
+        _peer_name_of() { printf 'cookie-importer'; }; cmd_list ) | cut -f1,2 | tr '\t' ' ' )"
+
+PH="${TMPDIR:-/tmp}/ov-peers-$$"; mkdir -p "$PH/sessions"
+printf '{"name":"twin","tmux":"s:@1.%%1","messagingSocketPath":"/x/a.sock"}\n' >"$PH/sessions/1.json"
+printf '{"name":"twin","tmux":"s:@2.%%2","messagingSocketPath":"/x/b.sock"}\n' >"$PH/sessions/2.json"
+printf '{"name":"solo","tmux":"s:@3.%%3","messagingSocketPath":"/x/c.sock"}\n' >"$PH/sessions/3.json"
+printf '{"name":"gone","tmux":"s:@4.%%4","messagingSocketPath":""}\n'         >"$PH/sessions/4.json"
+_peers() { ( CLAUDE_HOME="$PH"; _peer_live() { [ -n "$1" ]; }; _pane_by_peer_name "$1" ); }
+eq "peer name: a unique live name resolves to its pane"        "%3" "$(_peers solo)"
+eq "peer name: a duplicated name refuses instead of guessing"  "2"  "$(_peers twin >/dev/null 2>&1; echo $?)"
+eq "peer name: a session with no live socket is no candidate"  "1"  "$(_peers gone >/dev/null 2>&1; echo $?)"
+rm -rf "$PH"
+eq "resolve: an ambiguous peer name dies, it does not fall through to tmux" "yes" \
+   "$( ( _pane_by_peer_name() { return 2; }; _die() { printf 'AMBIG %s\n' "$1"; exit 1; }; tmux() { printf '%%99'; }
+        _resolve_pane twin ) 2>&1 | grep -q 'AMBIG.*more than one live' && echo yes || echo no)"
+eq "stop: an ambiguous peer name kills nothing" "yes" \
+   "$( ( _need() { :; }; _pane_by_peer_name() { return 2; }; _die() { printf 'AMBIG\n'; exit 1; }
+        tmux() { printf 'TMUX[%s]\n' "$*"; }; cmd_stop twin ) 2>&1 | grep -q TMUX && echo no || echo yes)"
+
+_guarded() { ( _die() { printf 'REFUSED %s\n' "$1"; exit 1; }
+  tmux() { printf '1234'; }; _peer_name_of() { printf 'cookie-importer'; }
+  _peer_guard %7 target ) 2>&1; }
+eq "peer guard: a peer-capable target is refused by name" "yes" \
+   "$(case "$(_guarded)" in *REFUSED*cookie-importer*) echo yes ;; *) echo no ;; esac)"
+eq "peer guard: a target reached through 'on <host>' is never refused" "" \
+   "$( ( export OVS_VIA_ON=1; _guarded ) )"
+eq "on: the remote command carries the cross-machine marker" "yes" \
+   "$( ( _need() { :; }; export OVERSEER_REMOTE_BIN='ovbin' OVERSEER_SSH='echo'
+        cmd_on host chat %1 hi ) 2>&1 | grep -q 'OVS_VIA_ON=1 ovbin' && echo yes || echo no)"
+
+_fleetsend() { ( _need() { :; }
+  _panes() { printf 'sess\t%%1\t111\tclaude\t/x\n'; }
+  _fleet_status() { printf '%%1\tclaude\tidle\n'; }
+  _label_pane() { printf '%s' "$1"; }
+  cmd_send() { printf 'SEND[%s]\n' "$*"; }
+  _fleet_local send "$@" ) 2>&1; }
+eq "fleet send: --force-keys reaches the per-pane send" "yes" \
+   "$(case "$(_fleetsend --yes --force-keys hi)" in *'SEND[--yes --force-keys %1 hi]'*) echo yes ;; *) echo no ;; esac)"
+eq "fleet send: --force-keys is not broadcast as the message" "no" \
+   "$(case "$(_fleetsend --yes --force-keys hi)" in *'%1 --force-keys'*) echo yes ;; *) echo no ;; esac)"
+
+_stoppeer() { ( _need() { :; }; _pbn; _resolve_pane() { printf '%%7'; }; _self_pane() { return 1; }
+  tmux() { printf 'TMUX[%s]\n' "$*"; return 0; }
+  cmd_stop "$1" ) 2>&1; }
+eq "stop: a peer name kills that pane, not the whole session" "yes" \
+   "$(case "$(_stoppeer cookie-importer)" in *'TMUX[kill-pane -t %7]'*) echo yes ;; *) echo no ;; esac)"
+eq "stop: a session name still kills the session" "yes" \
+   "$(case "$(_stoppeer work)" in *'TMUX[kill-session -t =work]'*) echo yes ;; *) echo no ;; esac)"
+
 _stubs() { _awaiting() { return 1; }
            _is_shell() { return 1; }
            _turn_advanced() { return 1; }

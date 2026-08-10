@@ -10,12 +10,18 @@ cmd_list() {
     done < <(tmux list-panes -a -F '#{session_name}	#{pane_id}	#{pane_pid}	#{pane_current_command}' 2>/dev/null)
     return
   fi
-  printf 'SESSION\tPANE\tPANE_PID\tHARNESS\tCWD\tPEER\n'
+  printf 'PEER\tSESSION\tPANE\tPANE_PID\tHARNESS\tCWD\n'
   local s pid_id pp kind cwd peer
   while IFS=$'\t' read -r s pid_id pp kind cwd; do
     peer=$(_peer_name_of "$pp") || peer='-'
-    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$s" "$pid_id" "$pp" "$kind" "$cwd" "$peer"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$peer" "$s" "$pid_id" "$pp" "$kind" "$cwd"
   done < <(_panes)
+}
+_label_pane() {
+  local pp name
+  pp=$(tmux display-message -p -t "$1" '#{pane_pid}' 2>/dev/null) || { printf '%s' "$1"; return 0; }
+  name=$(_peer_name_of "$pp") || { printf '%s' "$1"; return 0; }
+  printf '%s (%s)' "$name" "$1"
 }
 _self_peer_name() {
   [ -n "${TMUX_PANE:-}" ] || return 1
@@ -28,6 +34,7 @@ _stamp_from() {
 }
 _peer_guard() {
   local pane="$1" target="$2" pp name
+  [ -z "${OVS_VIA_ON:-}" ] || return 0
   pp=$(tmux display-message -p -t "$pane" '#{pane_pid}' 2>/dev/null) || return 0
   name=$(_peer_name_of "$pp") || return 0
   _die "$target is reachable on the harness peer channel as '$name' — deliver it with the SendMessage tool instead ({\"to\": \"$name\", ...}), which the receiver records as an authenticated peer message carrying its own guardrails; typing into its pane is recorded as if user typed it, so the receiver cannot tell an agent from its user. Pass --force-keys to take the keystroke path anyway."
@@ -392,10 +399,10 @@ _fleet_local() {
   [ "${#targets[@]}" -gt 0 ] || return 3
   case "$action" in
     status) _need jq; printf 'PANE\tHARNESS\tSTATE\n'; for p in "${targets[@]}"; do ( _fleet_status "$p" ) || true; done ;;
-    read)   _need jq; for p in "${targets[@]}"; do printf '===== %s =====\n' "$p"; ( cmd_read "$p" ) || printf '(unavailable)\n'; done ;;
+    read)   _need jq; for p in "${targets[@]}"; do printf '===== %s =====\n' "$(_label_pane "$p")"; ( cmd_read "$p" ) || printf '(unavailable)\n'; done ;;
     unsend) _need jq
       for p in "${targets[@]}"; do
-        printf '===== %s =====\n' "$p"
+        printf '===== %s =====\n' "$(_label_pane "$p")"
         _self_pane "$p" && { printf '(skipped — this is the pane overseer is running in)\n'; continue; }
         ( cmd_unsend "$p" ) || true
       done ;;
@@ -403,7 +410,7 @@ _fleet_local() {
       _need jq
       local -a ifl=(); while :; do case "${1:-}" in --run-queued) ifl+=("$1"); shift ;; *) break ;; esac; done
       for p in "${targets[@]}"; do
-        printf '===== %s =====\n' "$p"
+        printf '===== %s =====\n' "$(_label_pane "$p")"
         _self_pane "$p" && { printf '(skipped — this is the pane overseer is running in)\n'; continue; }
         ( cmd_interrupt ${ifl[@]+"${ifl[@]}"} "$p" ) || true
       done ;;
@@ -412,23 +419,23 @@ _fleet_local() {
       while :; do case "${1:-}" in --any) any=1; shift ;; *) break ;; esac; done
       local -a wt=()
       for p in "${targets[@]}"; do
-        _self_pane "$p" && { printf '# %s: (skipped — this is the pane overseer is running in)\n' "$p"; continue; }
+        _self_pane "$p" && { printf '# %s: (skipped — this is the pane overseer is running in)\n' "$(_label_pane "$p")"; continue; }
         wt+=("$p")
       done
       [ "${#wt[@]}" -gt 0 ] || { printf 'nothing to wait for — the only agent pane is the one overseer is running in\n'; return 0; }
       if [ "$any" = 1 ]; then _fleet_wait_any "${1:-$DEFAULT_TIMEOUT}" "${wt[@]}"
-      else for p in "${wt[@]}"; do printf '# %s: ' "$p"; ( cmd_wait "$p" "$@" ) || true; done; fi ;;
+      else for p in "${wt[@]}"; do printf '# %s: ' "$(_label_pane "$p")"; ( cmd_wait "$p" "$@" ) || true; done; fi ;;
     send|chat)
       [ "$action" = chat ] && _need jq
       while :; do case "${1:-}" in
-        --yes) fl+=("$1"); shift ;;
+        --yes|--force-keys) fl+=("$1"); shift ;;
         --notify) [ "$action" = send ] || _die "fleet chat already waits for every reply — --notify belongs to fleet send"
                   fl+=("$1"); shift ;;
         *) break ;; esac; done
-      msg="${1:-}"; [ -n "$msg" ] || _die "usage: overseer fleet $action [--yes] <message>  (broadcasts to every agent pane)"
+      msg="${1:-}"; [ -n "$msg" ] || _die "usage: overseer fleet $action [--yes] [--force-keys] <message>  (broadcasts to every agent pane)"
       local -a nt=(); { [ "$action" = send ] && [ -n "${2:-}" ]; } && nt=("$2")
       for p in "${targets[@]}"; do
-        printf '===== %s =====\n' "$p"
+        printf '===== %s =====\n' "$(_label_pane "$p")"
         st=$(_fleet_status "$p" | cut -f3)
         case "$st" in
           idle|'idle(0-turn)') : ;;
@@ -437,7 +444,7 @@ _fleet_local() {
         if [ "$action" = send ]; then ( cmd_send ${fl[@]+"${fl[@]}"} "$p" "$msg" ${nt[@]+"${nt[@]}"} ) || true
         else ( cmd_chat ${fl[@]+"${fl[@]}"} "$p" "$msg" ) || true; fi
       done ;;
-    *) _die "usage: overseer fleet [--hosts|--tailscale [--os NAME]] [-u USER] [status|read|unsend|interrupt [--run-queued]|wait [--any] [timeout]|send [--yes] [--notify] <msg> [notify_timeout]|chat [--yes] <msg>]  (no subcommand = status)" ;;
+    *) _die "usage: overseer fleet [--hosts|--tailscale [--os NAME]] [-u USER] [status|read|unsend|interrupt [--run-queued]|wait [--any] [timeout]|send [--yes] [--force-keys] [--notify] <msg> [notify_timeout]|chat [--yes] [--force-keys] <msg>]  (no subcommand = status)" ;;
   esac
 }
 _fleet_survey() {
@@ -482,7 +489,7 @@ _fleet_gate() {
 cmd_fleet() {
   _need tmux
   local remote=0 usetail=0 osfilter='' defuser="${OVERSEER_HOSTS_USER:-}"
-  local u='usage: overseer fleet [--hosts|--tailscale [--os NAME]] [-u USER] [status|read|unsend|interrupt [--run-queued]|wait [--any] [timeout]|send [--yes] [--dry-run] [--notify] <msg> [notify_timeout]|chat [--yes] [--dry-run] <msg>]'
+  local u='usage: overseer fleet [--hosts|--tailscale [--os NAME]] [-u USER] [status|read|unsend|interrupt [--run-queued]|wait [--any] [timeout]|send [--yes] [--force-keys] [--dry-run] [--notify] <msg> [notify_timeout]|chat [--yes] [--force-keys] [--dry-run] <msg>]'
   while :; do case "${1:-}" in
     --hosts) remote=1; shift ;;
     --tailscale) remote=1; usetail=1; shift ;;
@@ -498,19 +505,21 @@ cmd_fleet() {
     return "$frc"
   fi
   _need ssh
-  local yes=0 dry=0 msg=''
+  local yes=0 dry=0 msg='' fk=0
   case "$action" in
     send|chat)
       shift
       while :; do case "${1:-}" in
         --yes) yes=1; shift ;;
+        --force-keys) fk=1; shift ;;
         --dry-run) dry=1; shift ;;
         --notify) _die "--notify wakes the dispatching agent's own tmux pane, which exists only on this machine — run it against the local fleet (overseer fleet send --notify <msg>), not with --hosts/--tailscale" ;;
         *) break ;;
       esac; done
       msg="${1:-}"
-      [ -n "$msg" ] || _die "usage: overseer fleet --hosts $action [--yes] [--dry-run] <message>  (broadcasts to every idle agent in the fleet)"
-      set -- "$action" --yes "$msg" ;;
+      [ -n "$msg" ] || _die "usage: overseer fleet --hosts $action [--yes] [--force-keys] [--dry-run] <message>  (broadcasts to every idle agent in the fleet)"
+      local -a fka=(); [ "$fk" = 1 ] && fka=(--force-keys)
+      set -- "$action" --yes ${fka[@]+"${fka[@]}"} "$msg" ;;
   esac
   local ts=''
   [ "$usetail" = 1 ] && { command -v tailscale >/dev/null 2>&1 && ts=$(tailscale status 2>/dev/null || true); }
@@ -644,6 +653,9 @@ cmd_start() {
 cmd_stop() {
   _need tmux
   local target="${1:-}"; [ -n "$target" ] || _die "usage: overseer stop <pane|session>"
+  local peerpane rc=0; peerpane=$(_pane_by_peer_name "$target") || rc=$?
+  if [ "$rc" = 2 ]; then _peer_ambiguous "$target"; fi
+  [ -z "$peerpane" ] || target="$peerpane"
   case "$target" in
     %[0-9]*)
       local pane; pane=$(_resolve_pane "$target") || _die "no tmux pane for target: $target"
@@ -1022,7 +1034,7 @@ cmd_on() {
   [ -z "${OVERSEER_REMOTE_BIN:-}" ] && [ -z "${OVERSEER_NO_AUTODEPLOY:-}" ] && _on_ensure_deployed "$host" "$bin" "$cmdir"
   # shellcheck disable=SC2086
   exec ${OVERSEER_SSH:-ssh} -o ControlMaster=auto -o "ControlPath=$cmdir/%C" -o ControlPersist=60s \
-    -o ConnectTimeout=10 ${OVERSEER_SSH_OPTS:-} "$host" "$bin$rargs"
+    -o ConnectTimeout=10 ${OVERSEER_SSH_OPTS:-} "$host" "OVS_VIA_ON=1 $bin$rargs"
 }
 cmd_deploy() {
   _need ssh; _need tar
