@@ -5,6 +5,18 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.45.1] - 2026-08-12
+
+### Fixed
+
+- **`doctor` no longer fails a healthy remote host.** Its tmux reachability probe was `tmux info`,
+  which needs a *client*: over a non-tty ssh it exits 1 with `no current client` even though the
+  server is perfectly reachable. 0.41.3 turned that exit into a hard `[FAIL]`, so `on <host> doctor`
+  reported every remote Linux host as broken. Reachability is now `tmux list-sessions`, which the
+  server answers with no client attached, and the server pid is read the same way instead of through
+  `display-message`. The genuine case 0.41.3 was built for — a server this tmux cannot speak to
+  because the two builds disagree on the protocol — still FAILs, now for the right reason.
+
 ## [0.45.0] - 2026-08-12
 
 ### Added

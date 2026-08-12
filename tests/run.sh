@@ -397,7 +397,7 @@ eq "fleet send: --as-user reaches the per-pane send" "yes" \
 eq "fleet send: --as-user is not broadcast as the message" "no" \
    "$(case "$(_fleetsend --yes --as-user hi)" in *'%1 --as-user'*) echo yes ;; *) echo no ;; esac)"
 
-_delivered() { ( _need() { :; }; _uint() { :; }; DEFAULT_TIMEOUT=5
+_sent_msg() { ( _need() { :; }; _uint() { :; }; DEFAULT_TIMEOUT=5
   _target_ctx() { printf '%%7\tclaude\t/no/transcript'; }
   _no_self() { :; }; _lock_pane() { :; }; _unlock_pane() { :; }
   _queued() { return 1; }; _compacting() { return 1; }; _h_running() { return 1; }
@@ -408,15 +408,15 @@ _delivered() { ( _need() { :; }; _uint() { :; }; DEFAULT_TIMEOUT=5
   _deliver() { printf 'DELIVER[%s]\n' "$3"; return 1; }
   "$@" ) 2>&1; }
 eq "as-user: the message is delivered verbatim, with no sender prefix" "DELIVER[hi]" \
-   "$(_delivered cmd_send --yes --as-user %7 hi | head -1)"
+   "$(_sent_msg cmd_send --yes --as-user %7 hi | head -1)"
 eq "as-user: the peer refusal stands down without --force-keys" "no" \
-   "$(case "$(_delivered cmd_send --yes --as-user %7 hi)" in *GUARD*) echo yes ;; *) echo no ;; esac)"
+   "$(case "$(_sent_msg cmd_send --yes --as-user %7 hi)" in *GUARD*) echo yes ;; *) echo no ;; esac)"
 eq "as-user: chat delivers verbatim too" "DELIVER[hi]" \
-   "$(_delivered cmd_chat --yes --as-user %7 hi | head -1)"
+   "$(_sent_msg cmd_chat --yes --as-user %7 hi | head -1)"
 eq "force-keys alone still declares the sender" "DELIVER[STAMPED hi]" \
-   "$(_delivered cmd_send --yes --force-keys %7 hi | head -1)"
+   "$(_sent_msg cmd_send --yes --force-keys %7 hi | head -1)"
 eq "a plain send is still refused for a peer-capable target" "yes" \
-   "$(case "$(_delivered cmd_send --yes %7 hi)" in *GUARD*) echo yes ;; *) echo no ;; esac)"
+   "$(case "$(_sent_msg cmd_send --yes %7 hi)" in *GUARD*) echo yes ;; *) echo no ;; esac)"
 
 _stoppeer() { ( _need() { :; }; _pbn; _resolve_pane() { printf '%%7'; }; _self_pane() { return 1; }
   tmux() { printf 'TMUX[%s]\n' "$*"; return 0; }
@@ -644,6 +644,12 @@ eq "tmux: one build is not a mismatch"   "1" "$(_tmux_mismatch /usr/bin/tmux /us
 eq "tmux: two builds are a mismatch"     "0" "$(_tmux_mismatch /usr/bin/tmux /usr/local/bin/tmux; echo $?)"
 eq "tmux: an unreadable server binary is not a mismatch" "1" "$(_tmux_mismatch /usr/bin/tmux ''; echo $?)"
 eq "tmux: no client binary is not a mismatch"           "1" "$(_tmux_mismatch '' /usr/local/bin/tmux; echo $?)"
+eq "tmux: reachability is probed without needing a client" "0" \
+   "$( ( tmux() { case "$1" in list-sessions) return 0 ;; *) return 1 ;; esac; }; _tmux_reachable; echo $? ) )"
+eq "tmux: an unreachable server is still unreachable" "1" \
+   "$( ( tmux() { return 1; }; _tmux_reachable; echo $? ) )"
+eq "tmux: the server pid is read without needing a client" "4242" \
+   "$( ( tmux() { case "$1" in list-sessions) printf '4242\n4242\n' ;; *) return 1 ;; esac; }; _tmux_server_pid ) )"
 _tmm=$(_tmux_mismatch_text /usr/bin/tmux 'tmux 3.4' /usr/local/bin/tmux)
 has_txt "the mismatch text names the PATH binary"   "$_tmm" '/usr/bin/tmux (tmux 3.4)'
 has_txt "the mismatch text names the server binary" "$_tmm" '/usr/local/bin/tmux'

@@ -738,9 +738,10 @@ cmd_menu() {
 }
 _tmux_server_pid() {
   local p
-  p=$(tmux display-message -p '#{pid}' 2>/dev/null) && [ -n "$p" ] && { printf '%s' "$p"; return 0; }
+  p=$(tmux list-sessions -F '#{pid}' 2>/dev/null | head -1) && [ -n "$p" ] && { printf '%s' "$p"; return 0; }
   pgrep -u "$(id -u)" -x 'tmux: server' 2>/dev/null | head -1
 }
+_tmux_reachable() { tmux list-sessions >/dev/null 2>&1; }
 _tmux_mismatch() { [ -n "$1" ] && [ -n "$2" ] && [ "$1" != "$2" ]; }
 _tmux_mismatch_text() {
   printf 'two tmux builds on this machine: PATH resolves to %s (%s), the running server was started from %s. A tmux client only speaks to a server of its own protocol version, so calling the other path fails with "server exited unexpectedly" — which reads like the server died. overseer always uses whichever tmux is on PATH; keep scripts and shells on that one' \
@@ -983,7 +984,7 @@ cmd_doctor() {
   fi
   local spid sexe cexe
   spid=$(_tmux_server_pid) || spid=''
-  if tmux info >/dev/null 2>&1; then printf '  [ok]   tmux server running\n'
+  if _tmux_reachable; then printf '  [ok]   tmux server running\n'
   elif [ -n "$spid" ]; then
     printf '  [FAIL] a tmux server is running (pid %s) but this tmux cannot reach it\n' "$spid"; bad=1
   else printf '  [warn] no tmux server yet (start a tmux session to drive)\n'; fi
