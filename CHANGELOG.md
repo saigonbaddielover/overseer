@@ -5,6 +5,21 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.45.0] - 2026-08-12
+
+### Added
+
+- **`--as-user` on `chat`/`send`/`fleet send`/`fleet chat` — the user's authority, delegated for one
+  dispatch.** The peer refusal and the sender prefix exist so a worker can tell an agent from its own
+  user; the cost is that a worker asked to do something by another agent stops and waits for its user
+  to approve. When the user has already delegated that dispatch — "send this to X as me" — that second
+  approval is the user approving their own instruction. `--as-user` implies `--force-keys` and
+  suppresses the prefix, so the message lands byte-identical to the user typing it and the worker acts
+  on it directly. It is a flag rather than a mode because it spends the user's authority: it belongs to
+  a dispatch the user explicitly delegated, never to an agent getting past a refusal of its own. The
+  default path is unchanged — a peer-capable target is still refused, and `--force-keys` still names
+  the sender.
+
 ## [0.44.0] - 2026-08-10
 
 ### Added

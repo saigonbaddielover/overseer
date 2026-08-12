@@ -129,10 +129,10 @@ _notify_spawn() {
 }
 cmd_send() {
   _need tmux
-  local confirm=1 notify=0 forcekeys=0
-  while :; do case "${1:-}" in --yes) confirm=0; shift ;; --notify) notify=1; shift ;; --force-keys) forcekeys=1; shift ;; *) break ;; esac; done
+  local confirm=1 notify=0 forcekeys=0 asuser=0
+  while :; do case "${1:-}" in --yes) confirm=0; shift ;; --notify) notify=1; shift ;; --force-keys) forcekeys=1; shift ;; --as-user) asuser=1; forcekeys=1; shift ;; *) break ;; esac; done
   local target="${1:-}" msg
-  [ -n "$target" ] || _die "usage: overseer send [--yes] [--notify] [--force-keys] <pane|session> <message|-> [notify_timeout_s]"
+  [ -n "$target" ] || _die "usage: overseer send [--yes] [--notify] [--force-keys|--as-user] <pane|session> <message|-> [notify_timeout_s]"
   msg=$(_read_msg "${2:-}")
   [ -n "$msg" ] || _die "usage: overseer send [--yes] [--notify] <pane|session> <message|-> [notify_timeout_s]  (empty message)"
   local ntimeout="${3:-$DEFAULT_TIMEOUT}" back=''
@@ -143,7 +143,7 @@ cmd_send() {
   IFS=$'\t' read -r pane kind path <<< "$ctx"
   _no_self "$pane" "send to"
   [ "$forcekeys" = 1 ] || _peer_guard "$pane" "$target"
-  msg=$(_stamp_from "$msg" "$pane")
+  [ "$asuser" = 1 ] || msg=$(_stamp_from "$msg" "$pane")
   _lock_pane "$pane"
   { _queued "$pane" && ! _compacting "$pane"; } && { _unlock_pane; _die "a message is already queued to $pane behind its running turn (the agent holds one queued message at a time) — wait for it to run first: overseer wait $target, or drop it and free the slot: overseer unsend $target"; }
   local base; base=$(_h_turn_count "$kind" "$path" 2>/dev/null); base="${base:-0}"
@@ -270,18 +270,18 @@ to interrupt and let it run: overseer interrupt --run-queued $target"
 # send + wait for the turn to finish + print the reply (the human round-trip).
 cmd_chat() {
   _need tmux; _need jq
-  local confirm=1 forcekeys=0
-  while :; do case "${1:-}" in --yes) confirm=0; shift ;; --force-keys) forcekeys=1; shift ;; *) break ;; esac; done
+  local confirm=1 forcekeys=0 asuser=0
+  while :; do case "${1:-}" in --yes) confirm=0; shift ;; --force-keys) forcekeys=1; shift ;; --as-user) asuser=1; forcekeys=1; shift ;; *) break ;; esac; done
   local target="${1:-}" msg
-  [ -n "$target" ] || _die "usage: overseer chat [--yes] [--force-keys] <pane|session> <message|-> [timeout_s]"
+  [ -n "$target" ] || _die "usage: overseer chat [--yes] [--force-keys|--as-user] <pane|session> <message|-> [timeout_s]"
   msg=$(_read_msg "${2:-}")
-  [ -n "$msg" ] || _die "usage: overseer chat [--yes] [--force-keys] <pane|session> <message|-> [timeout_s]  (empty message)"
+  [ -n "$msg" ] || _die "usage: overseer chat [--yes] [--force-keys|--as-user] <pane|session> <message|-> [timeout_s]  (empty message)"
   local timeout="${3:-$DEFAULT_TIMEOUT}"; _uint "$timeout"
   local ctx pane kind path; ctx=$(_target_ctx "$target") || _target_die "$target" "no agent pane (claude/codex) for target: $target (if the session is split, target the pane id %N — see: overseer list)"
   IFS=$'\t' read -r pane kind path <<< "$ctx"
   _no_self "$pane" "chat with"
   [ "$forcekeys" = 1 ] || _peer_guard "$pane" "$target"
-  msg=$(_stamp_from "$msg" "$pane")
+  [ "$asuser" = 1 ] || msg=$(_stamp_from "$msg" "$pane")
   _lock_pane "$pane"
   { _queued "$pane" && ! _compacting "$pane"; } && { _unlock_pane; _die "a message is already queued to $pane behind its running turn (the agent holds one queued message at a time) — wait for it to run first: overseer wait $target, or drop it and free the slot: overseer unsend $target"; }
   local has_tx=0; { [ -n "$path" ] && [ -f "$path" ]; } && has_tx=1
@@ -438,11 +438,11 @@ _fleet_local() {
     send|chat)
       [ "$action" = chat ] && _need jq
       while :; do case "${1:-}" in
-        --yes|--force-keys) fl+=("$1"); shift ;;
+        --yes|--force-keys|--as-user) fl+=("$1"); shift ;;
         --notify) [ "$action" = send ] || _die "fleet chat already waits for every reply — --notify belongs to fleet send"
                   fl+=("$1"); shift ;;
         *) break ;; esac; done
-      msg="${1:-}"; [ -n "$msg" ] || _die "usage: overseer fleet $action [--yes] [--force-keys] <message>  (broadcasts to every agent pane)"
+      msg="${1:-}"; [ -n "$msg" ] || _die "usage: overseer fleet $action [--yes] [--force-keys|--as-user] <message>  (broadcasts to every agent pane)"
       local -a nt=(); { [ "$action" = send ] && [ -n "${2:-}" ]; } && nt=("$2")
       for p in "${targets[@]}"; do
         printf '===== %s =====\n' "$(_label_pane "$p")"
@@ -454,7 +454,7 @@ _fleet_local() {
         if [ "$action" = send ]; then ( cmd_send ${fl[@]+"${fl[@]}"} "$p" "$msg" ${nt[@]+"${nt[@]}"} ) || true
         else ( cmd_chat ${fl[@]+"${fl[@]}"} "$p" "$msg" ) || true; fi
       done ;;
-    *) _die "usage: overseer fleet [--hosts|--tailscale [--os NAME]] [-u USER] [status|read|unsend|interrupt [--run-queued]|wait [--any] [timeout]|send [--yes] [--force-keys] [--notify] <msg> [notify_timeout]|chat [--yes] [--force-keys] <msg>]  (no subcommand = status)" ;;
+    *) _die "usage: overseer fleet [--hosts|--tailscale [--os NAME]] [-u USER] [status|read|unsend|interrupt [--run-queued]|wait [--any] [timeout]|send [--yes] [--force-keys|--as-user] [--notify] <msg> [notify_timeout]|chat [--yes] [--force-keys|--as-user] <msg>]  (no subcommand = status)" ;;
   esac
 }
 _fleet_survey() {
@@ -499,7 +499,7 @@ _fleet_gate() {
 cmd_fleet() {
   _need tmux
   local remote=0 usetail=0 osfilter='' defuser="${OVERSEER_HOSTS_USER:-}"
-  local u='usage: overseer fleet [--hosts|--tailscale [--os NAME]] [-u USER] [status|read|unsend|interrupt [--run-queued]|wait [--any] [timeout]|send [--yes] [--force-keys] [--dry-run] [--notify] <msg> [notify_timeout]|chat [--yes] [--force-keys] [--dry-run] <msg>]'
+  local u='usage: overseer fleet [--hosts|--tailscale [--os NAME]] [-u USER] [status|read|unsend|interrupt [--run-queued]|wait [--any] [timeout]|send [--yes] [--force-keys|--as-user] [--dry-run] [--notify] <msg> [notify_timeout]|chat [--yes] [--force-keys|--as-user] [--dry-run] <msg>]'
   while :; do case "${1:-}" in
     --hosts) remote=1; shift ;;
     --tailscale) remote=1; usetail=1; shift ;;
@@ -515,20 +515,21 @@ cmd_fleet() {
     return "$frc"
   fi
   _need ssh
-  local yes=0 dry=0 msg='' fk=0
+  local yes=0 dry=0 msg='' fk=0 au=0
   case "$action" in
     send|chat)
       shift
       while :; do case "${1:-}" in
         --yes) yes=1; shift ;;
         --force-keys) fk=1; shift ;;
+        --as-user) au=1; shift ;;
         --dry-run) dry=1; shift ;;
         --notify) _die "--notify wakes the dispatching agent's own tmux pane, which exists only on this machine — run it against the local fleet (overseer fleet send --notify <msg>), not with --hosts/--tailscale" ;;
         *) break ;;
       esac; done
       msg="${1:-}"
-      [ -n "$msg" ] || _die "usage: overseer fleet --hosts $action [--yes] [--force-keys] [--dry-run] <message>  (broadcasts to every idle agent in the fleet)"
-      local -a fka=(); [ "$fk" = 1 ] && fka=(--force-keys)
+      [ -n "$msg" ] || _die "usage: overseer fleet --hosts $action [--yes] [--force-keys|--as-user] [--dry-run] <message>  (broadcasts to every idle agent in the fleet)"
+      local -a fka=(); [ "$fk" = 1 ] && fka=(--force-keys); [ "$au" = 1 ] && fka=(--as-user)
       set -- "$action" --yes ${fka[@]+"${fka[@]}"} "$msg" ;;
   esac
   local ts=''
