@@ -392,6 +392,31 @@ eq "fleet send: --force-keys reaches the per-pane send" "yes" \
    "$(case "$(_fleetsend --yes --force-keys hi)" in *'SEND[--yes --force-keys %1 hi]'*) echo yes ;; *) echo no ;; esac)"
 eq "fleet send: --force-keys is not broadcast as the message" "no" \
    "$(case "$(_fleetsend --yes --force-keys hi)" in *'%1 --force-keys'*) echo yes ;; *) echo no ;; esac)"
+eq "fleet send: --as-user reaches the per-pane send" "yes" \
+   "$(case "$(_fleetsend --yes --as-user hi)" in *'SEND[--yes --as-user %1 hi]'*) echo yes ;; *) echo no ;; esac)"
+eq "fleet send: --as-user is not broadcast as the message" "no" \
+   "$(case "$(_fleetsend --yes --as-user hi)" in *'%1 --as-user'*) echo yes ;; *) echo no ;; esac)"
+
+_delivered() { ( _need() { :; }; _uint() { :; }; DEFAULT_TIMEOUT=5
+  _target_ctx() { printf '%%7\tclaude\t/no/transcript'; }
+  _no_self() { :; }; _lock_pane() { :; }; _unlock_pane() { :; }
+  _queued() { return 1; }; _compacting() { return 1; }; _h_running() { return 1; }
+  _h_turn_count() { printf '0'; }; _fsize() { printf '0'; }
+  _peer_guard() { printf 'GUARD\n'; }
+  _stamp_from() { printf 'STAMPED %s' "$1"; }
+  _undelivered() { printf 'undelivered'; }
+  _deliver() { printf 'DELIVER[%s]\n' "$3"; return 1; }
+  "$@" ) 2>&1; }
+eq "as-user: the message is delivered verbatim, with no sender prefix" "DELIVER[hi]" \
+   "$(_delivered cmd_send --yes --as-user %7 hi | head -1)"
+eq "as-user: the peer refusal stands down without --force-keys" "no" \
+   "$(case "$(_delivered cmd_send --yes --as-user %7 hi)" in *GUARD*) echo yes ;; *) echo no ;; esac)"
+eq "as-user: chat delivers verbatim too" "DELIVER[hi]" \
+   "$(_delivered cmd_chat --yes --as-user %7 hi | head -1)"
+eq "force-keys alone still declares the sender" "DELIVER[STAMPED hi]" \
+   "$(_delivered cmd_send --yes --force-keys %7 hi | head -1)"
+eq "a plain send is still refused for a peer-capable target" "yes" \
+   "$(case "$(_delivered cmd_send --yes %7 hi)" in *GUARD*) echo yes ;; *) echo no ;; esac)"
 
 _stoppeer() { ( _need() { :; }; _pbn; _resolve_pane() { printf '%%7'; }; _self_pane() { return 1; }
   tmux() { printf 'TMUX[%s]\n' "$*"; return 0; }
