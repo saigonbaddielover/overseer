@@ -440,7 +440,7 @@ eq "known_hosts: an unhashed name is extracted, [host]:port stripped, hashed ski
    "$(printf 'a.example\nb.example')" \
    "$( TH=$(mktemp -d); mkdir -p "$TH/.ssh"
        printf '|1|abcd=|efgh= ssh-ed25519 AAAA\na.example ssh-ed25519 AAAA\n[b.example]:2222 ssh-rsa BBBB\n# comment\n' > "$TH/.ssh/known_hosts"
-       ( HOME="$TH" _known_hosts_names ); rm -rf "$TH" )"
+       ( _known_hosts_files() { printf '%s\n' "$TH/.ssh/known_hosts"; }; HOME="$TH" _known_hosts_names ); rm -rf "$TH" )"
 eq "history: ssh targets are extracted, flags skipped" \
    "$(printf 'sandbox@1.2.3.4\nbox.example')" \
    "$( TH=$(mktemp -d)

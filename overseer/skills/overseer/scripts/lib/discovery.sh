@@ -172,7 +172,7 @@ _khost_present() {
 }
 _known_hosts_names() {
   local f
-  for f in "$HOME/.ssh/known_hosts" "$HOME/.ssh/known_hosts.old" "$HOME/.ssh/known_hosts2" /etc/ssh/ssh_known_hosts; do
+  while IFS= read -r f; do
     [ -r "$f" ] || continue
     awk '/^[|@#]/ { next }
       { n = split($1, a, ",")
@@ -180,7 +180,7 @@ _known_hosts_names() {
           h = a[i]; sub(/^\[/, "", h); sub(/\](:[0-9]+)?$/, "", h)
           if (h != "" && h != "localhost") print h
         } }' "$f"
-  done | awk 'NF && !seen[$0]++'
+  done < <(_known_hosts_files) | awk 'NF && !seen[$0]++'
 }
 _history_ssh_targets() {
   local f
