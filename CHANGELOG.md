@@ -5,6 +5,20 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.48.0] - 2026-08-12
+
+### Changed
+
+- **`discover` never guesses the login user.** The `ssh -G` local-login default (your own `$(id -un)`)
+  is no longer treated as a resolved user — a host that carries no explicit `User` in ssh config, no
+  `user@` source hint, and no `-u`/`$OVERSEER_HOSTS_USER` override is now classed `unknown-user` and
+  printed as `?@host` with a note to set a `User` (or pass `-u`), instead of being fabricated as
+  `<you>@host`. Only a real, recorded user is ever shown.
+- **User resolution consults the host's name, not just its IP.** A tailnet candidate is resolved
+  through `ssh -G <name>` before falling back to `ssh -G <ip>`, so a single wildcard block —
+  `Host client-* / User agency` — supplies the login user for every matching machine, which the
+  IP-keyed lookup could never see.
+
 ## [0.47.0] - 2026-08-12
 
 ### Added

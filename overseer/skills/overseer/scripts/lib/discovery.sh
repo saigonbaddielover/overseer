@@ -216,6 +216,12 @@ _ssh_resolve() {
     tolower($1) == "identityfile" && idf == "" { idf = $2 }
     END { printf "%s\t%s\t%s\n", u, h, idf }'
 }
+_ssh_explicit_user() {
+  local u
+  IFS=$'\t' read -r u _ _ < <(_ssh_resolve "$1") || true
+  [ -n "$u" ] && [ "$u" != "$(id -un)" ] && printf '%s' "$u"
+  return 0
+}
 _ts_inventory() {
   command -v jq >/dev/null 2>&1 || return 0
   ${OVERSEER_TS:-tailscale} status --json 2>/dev/null | jq -r '

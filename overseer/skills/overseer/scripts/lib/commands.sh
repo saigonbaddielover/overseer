@@ -1266,14 +1266,21 @@ cmd_discover() {
   done < <(_discover_sources "$etchosts")
   [ "${#order[@]}" -gt 0 ] || _die "no remote machines found in any source (tailnet, ssh config incl. system + Include, known_hosts, shell history, docker contexts). Add Host entries to ~/.ssh/config, or run on a machine with tailscale."
   local -a rows=() writes=() wins=() gaps=()
-  local target ruser rhost sshv rd n_drive=0 n_win=0 n_gap=0 class note probed source
+  local target ruser sshv rd n_drive=0 n_win=0 n_gap=0 class note probed source
   for ip in "${order[@]}"; do
     name="${CAND_NAME[$ip]}"; os="${CAND_OS[$ip]}"; source="${CAND_SRC[$ip]}"
     case "$source" in *known_hosts*) : ;; *) _khost_present "$ip" && source="$source+known_hosts" ;; esac
     ruser="${CAND_HINT[$ip]:-}"
+    if [ -z "$ruser" ] && [ -n "$name" ] && [ "$name" != '?' ] && [ "$name" != "$ip" ]; then
+      ruser=$(_ssh_explicit_user "$name")
+    fi
+    [ -z "$ruser" ] && ruser=$(_ssh_explicit_user "$ip")
+    [ -z "$ruser" ] && ruser="$defuser"
     if [ -z "$ruser" ]; then
-      IFS=$'\t' read -r ruser rhost _ < <(_ssh_resolve "$ip") || true
-      [ -n "$ruser" ] || ruser="${defuser:-$(id -un)}"
+      class=unknown-user; note='user unknown — overseer never guesses; set a User for this host in ssh config or pass -u USER'
+      gaps+=("?@$ip"); n_gap=$((n_gap + 1))
+      rows+=("$(printf '%s\t?@%s\t%s\t%s\t%s\t%s' "$name" "$ip" "$os" "$source" "$class" "$note")")
+      continue
     fi
     target="$ruser@$ip"
     if [ "$os" = windows ]; then

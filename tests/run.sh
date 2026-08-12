@@ -476,6 +476,19 @@ eq "discover: the table carries a SOURCE column" "yes" \
    "$(case "$(_discover)" in *'SOURCE'*STATUS*) echo yes ;; *) echo no ;; esac)"
 
 # shellcheck disable=SC2120
+_discnoguess() { ( _need() { :; }; _uint() { :; }
+  _ts_inventory() { printf '100.0.0.9\tself-box\tlinux\tself\t\n100.0.0.5\tmystery\tlinux\tonline\tmystery.ts.net\n'; }
+  _ssh_config_aliases() { return 0; }
+  _known_hosts_names() { return 0; }; _history_ssh_targets() { return 0; }
+  _docker_ssh_hosts() { return 0; }; _etc_hosts_names() { return 0; }; _khost_present() { return 1; }
+  _ssh_resolve() { printf '%s\t%s\t\n' "$(id -un)" "$1"; }
+  _host_probe() { printf '%s\tonline\tlinux\tok\tyes' "$1"; }
+  command() { case "$1" in -v) return 1 ;; *) builtin command "$@" ;; esac; }
+  cmd_discover "$@" ) 2>&1; }
+eq "discover: a bare ssh -G default user is unknown, never guessed" "yes" \
+   "$(case "$(_discnoguess)" in *"$(id -un)@100.0.0.5"*) echo no ;; *'?@100.0.0.5'*unknown-user*) echo yes ;; *) echo no ;; esac)"
+
+# shellcheck disable=SC2120
 _dischint() { ( _need() { :; }; _uint() { :; }
   _ts_inventory() { return 0; }
   _ssh_config_aliases() { return 0; }
