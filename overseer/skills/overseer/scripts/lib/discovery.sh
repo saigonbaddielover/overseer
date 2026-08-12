@@ -124,7 +124,7 @@ _ssh_config_hosts() {
   awk 'tolower($1) == "host" { for (i = 2; i <= NF; i++) if ($i !~ /[*?!]/) print $i }'
 }
 _ssh_include_files() {
-  local f="$1" line g ff
+  local f="$1" base="$2" line g ff
   [ -r "$f" ] || return 0
   while IFS= read -r line; do
     line="${line#"${line%%[![:space:]]*}"}"
@@ -136,23 +136,78 @@ _ssh_include_files() {
           case "$g" in
             /*) : ;;
             "~/"*) g="$HOME/${g#\~/}" ;;
-            *) g="$HOME/.ssh/$g" ;;
+            *) g="$base/$g" ;;
           esac
           # shellcheck disable=SC2086
           for ff in $g; do
             [ -f "$ff" ] || continue
-            printf '%s\n' "$ff"; _ssh_include_files "$ff"
+            printf '%s\n' "$ff"; _ssh_include_files "$ff" "${ff%/*}"
           done
         done ;;
     esac
   done < "$f"
 }
+_ssh_config_files() {
+  local main="$HOME/.ssh/config" sys="/etc/ssh/ssh_config"
+  [ -r "$main" ] && { printf '%s\n' "$main"; _ssh_include_files "$main" "$HOME/.ssh"; }
+  [ -r "$sys" ] && { printf '%s\n' "$sys"; _ssh_include_files "$sys" /etc/ssh; }
+}
 _ssh_config_aliases() {
-  local main="${1:-$HOME/.ssh/config}" f
-  [ -r "$main" ] || return 0
-  { printf '%s\n' "$main"; _ssh_include_files "$main"; } | while IFS= read -r f; do
+  local f
+  _ssh_config_files | while IFS= read -r f; do
     [ -r "$f" ] && _ssh_config_hosts < "$f"
   done | awk 'NF && !seen[$0]++'
+}
+_known_hosts_files() {
+  printf '%s\n' "$HOME/.ssh/known_hosts" "$HOME/.ssh/known_hosts.old" "$HOME/.ssh/known_hosts2" /etc/ssh/ssh_known_hosts
+}
+_khost_present() {
+  local name="$1" f
+  command -v ssh-keygen >/dev/null 2>&1 || return 1
+  while IFS= read -r f; do
+    [ -r "$f" ] || continue
+    ssh-keygen -F "$name" -f "$f" >/dev/null 2>&1 && return 0
+  done < <(_known_hosts_files)
+  return 1
+}
+_known_hosts_names() {
+  local f
+  for f in "$HOME/.ssh/known_hosts" "$HOME/.ssh/known_hosts.old" "$HOME/.ssh/known_hosts2" /etc/ssh/ssh_known_hosts; do
+    [ -r "$f" ] || continue
+    awk '/^[|@#]/ { next }
+      { n = split($1, a, ",")
+        for (i = 1; i <= n; i++) {
+          h = a[i]; sub(/^\[/, "", h); sub(/\](:[0-9]+)?$/, "", h)
+          if (h != "" && h != "localhost") print h
+        } }' "$f"
+  done | awk 'NF && !seen[$0]++'
+}
+_history_ssh_targets() {
+  local f
+  for f in "$HOME/.bash_history" "$HOME/.zsh_history" "$HOME/.local/share/fish/fish_history"; do
+    [ -r "$f" ] || continue
+    tr ';&|' '\n\n\n' < "$f" | awk '
+      { for (i = 1; i <= NF; i++) if ($i == "ssh") {
+          j = i + 1
+          while (j <= NF) {
+            if ($j ~ /^-/) { if ($j ~ /^-[piloFbceDLRWJQm]$/) j++; j++; continue }
+            print $j; break
+          }
+        } }' 2>/dev/null
+  done | awk 'NF && $0 !~ /[*?${}]/ && !seen[$0]++'
+}
+_docker_ssh_hosts() {
+  command -v docker >/dev/null 2>&1 || return 0
+  docker context ls --format '{{.DockerEndpoint}}' 2>/dev/null | sed -n 's#^ssh://##p' | awk 'NF && !seen[$0]++'
+}
+_etc_hosts_names() {
+  local hf="${1:-/etc/hosts}"
+  [ -r "$hf" ] || return 0
+  awk '!/^[[:space:]]*#/ && NF >= 2 {
+    ip = $1
+    if (ip ~ /^127\./ || ip == "::1" || ip ~ /^0\.0\.0\.0/ || ip ~ /^255\./ || ip ~ /^(fe00|ff00|ff02):/ || ip == "::") next
+    for (i = 2; i <= NF; i++) if ($i !~ /^(localhost|ip6-)/) print $i
+  }' "$hf" | awk 'NF && !seen[$0]++'
 }
 _ssh_resolve() {
   ${OVERSEER_SSH:-ssh} -G "$1" 2>/dev/null | awk '
@@ -164,10 +219,11 @@ _ssh_resolve() {
 _ts_inventory() {
   command -v jq >/dev/null 2>&1 || return 0
   ${OVERSEER_TS:-tailscale} status --json 2>/dev/null | jq -r '
-    def nm: ((.DNSName // "") | split(".")[0]) as $d | (if $d == "" then (.HostName // "?") else $d end);
-    (.Self | [ (.TailscaleIPs[0] // ""), nm, (.OS // "?"), "self" ] | @tsv),
+    def dnsfull: ((.DNSName // "") | rtrimstr("."));
+    def nm: (dnsfull | split(".")[0]) as $d | (if $d == "" then (.HostName // "?") else $d end);
+    (.Self | [ (.TailscaleIPs[0] // ""), nm, (.OS // "?"), "self", dnsfull ] | @tsv),
     ((.Peer // {} | .[]) | [ (.TailscaleIPs[0] // ""), nm, (.OS // "?"),
-      (if .Online then "online" else "offline" end) ] | @tsv)' 2>/dev/null
+      (if .Online then "online" else "offline" end), dnsfull ] | @tsv)' 2>/dev/null
 }
 _ts_state() {
   awk -v hp="$1" '
