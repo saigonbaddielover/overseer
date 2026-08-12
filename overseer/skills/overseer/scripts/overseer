@@ -70,6 +70,7 @@ main() {
     on) cmd_on "$@" ;;
     deploy) cmd_deploy "$@" ;;
     hosts) cmd_hosts "$@" ;;
+    discover) cmd_discover "$@" ;;
     provision) cmd_provision "$@" ;;
     win) cmd_win "$@" ;;
     ''|-h|--help)
@@ -103,6 +104,7 @@ main() {
       printf '  deploy <host>              copy overseer to ~/.overseer on a remote ssh host (once, before "on")\n'
       printf '  on    <host> <command> [args]  run any overseer command on a remote ssh host (ControlPersist-reused; e.g. on sandbox chat %%0 hi)\n'
       printf '  hosts [--list] [--tailscale] [--os NAME] [-u USER] [-t secs]  survey the fleet: per host print user@host + online/os/ssh/drive-able (inventory from OVERSEER_HOSTS, ~/.ssh/config, or --tailscale; -u sets the login user for bare hosts)\n'
+      printf '  discover [--write] [--no-probe] [--no-tailscale] [--os NAME] [-u USER] [-t secs]  auto-find reachable remotes: enumerate tailnet peers + ssh-config Host entries (incl. Include), resolve each via ssh -G, probe reachability/OS/drive-ability, classify drivable/windows/gap; --write saves the drivable user@ip into ~/.config/overseer/hosts (a managed block; hand-written lines are kept) for hosts/fleet --hosts. A "gap" host is one ssh could not auth — give overseer its user/key\n'
       printf '  provision [--dry-run] <host>  install the missing Linux drive deps (tmux+jq) on a remote ssh host (needs root/passwordless sudo); fixes a hosts DRIVE=no:tmux/no:jq\n'
       printf '  win   <host>[/name] <verb> [args]  drive a remote WINDOWS console broker over ssh (the win prefix is to Windows what "on <host>" is to remote Linux); e.g. overseer win admin@win-host chat "hi"\n'
       printf '        win verbs: show start list peek keys sh read chat send unsend interrupt wait quit stop slash menu\n'

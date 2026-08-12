@@ -123,6 +123,52 @@ _hosts_parse() { awk '{sub(/#.*/, ""); if ($1 != "") print $1}'; }
 _ssh_config_hosts() {
   awk 'tolower($1) == "host" { for (i = 2; i <= NF; i++) if ($i !~ /[*?!]/) print $i }'
 }
+_ssh_include_files() {
+  local f="$1" line g ff
+  [ -r "$f" ] || return 0
+  while IFS= read -r line; do
+    line="${line#"${line%%[![:space:]]*}"}"
+    case "$line" in
+      [Ii][Nn][Cc][Ll][Uu][Dd][Ee][[:space:]]*)
+        # shellcheck disable=SC2086
+        set -- ${line#* }
+        for g in "$@"; do
+          case "$g" in
+            /*) : ;;
+            "~/"*) g="$HOME/${g#\~/}" ;;
+            *) g="$HOME/.ssh/$g" ;;
+          esac
+          # shellcheck disable=SC2086
+          for ff in $g; do
+            [ -f "$ff" ] || continue
+            printf '%s\n' "$ff"; _ssh_include_files "$ff"
+          done
+        done ;;
+    esac
+  done < "$f"
+}
+_ssh_config_aliases() {
+  local main="${1:-$HOME/.ssh/config}" f
+  [ -r "$main" ] || return 0
+  { printf '%s\n' "$main"; _ssh_include_files "$main"; } | while IFS= read -r f; do
+    [ -r "$f" ] && _ssh_config_hosts < "$f"
+  done | awk 'NF && !seen[$0]++'
+}
+_ssh_resolve() {
+  ${OVERSEER_SSH:-ssh} -G "$1" 2>/dev/null | awk '
+    tolower($1) == "user" && u == "" { u = $2 }
+    tolower($1) == "hostname" && h == "" { h = $2 }
+    tolower($1) == "identityfile" && idf == "" { idf = $2 }
+    END { printf "%s\t%s\t%s\n", u, h, idf }'
+}
+_ts_inventory() {
+  command -v jq >/dev/null 2>&1 || return 0
+  ${OVERSEER_TS:-tailscale} status --json 2>/dev/null | jq -r '
+    def nm: ((.DNSName // "") | split(".")[0]) as $d | (if $d == "" then (.HostName // "?") else $d end);
+    (.Self | [ (.TailscaleIPs[0] // ""), nm, (.OS // "?"), "self" ] | @tsv),
+    ((.Peer // {} | .[]) | [ (.TailscaleIPs[0] // ""), nm, (.OS // "?"),
+      (if .Online then "online" else "offline" end) ] | @tsv)' 2>/dev/null
+}
 _ts_state() {
   awk -v hp="$1" '
     $1 == hp || $2 == hp {

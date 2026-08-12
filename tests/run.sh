@@ -418,6 +418,39 @@ eq "force-keys alone still declares the sender" "DELIVER[STAMPED hi]" \
 eq "a plain send is still refused for a peer-capable target" "yes" \
    "$(case "$(_sent_msg cmd_send --yes %7 hi)" in *GUARD*) echo yes ;; *) echo no ;; esac)"
 
+eq "discover class: linux + tmux/jq is drivable"        "drivable"    "$(_discover_class ok linux yes)"
+eq "discover class: linux missing a dep needs-deps"     "needs-deps"  "$(_discover_class ok linux no:jq)"
+eq "discover class: a windows host is a win target"     "windows"     "$(_discover_class ok windows -)"
+eq "discover class: ssh auth failure is a gap"          "gap"         "$(_discover_class deny '?' -)"
+eq "discover class: no route is unreachable"            "unreachable" "$(_discover_class unreach '?' -)"
+
+_discw() { ( _die() { printf 'ERR %s\n' "$1"; exit 1; }; _discover_write "$@" ) }
+DHF=$(mktemp)
+printf 'hand@kept.example\n' > "$DHF"
+_discw "$DHF" 'a@1.1.1.1' 'b@2.2.2.2' >/dev/null
+eq "discover write: keeps hand-written lines"      "1" "$(grep -c '^hand@kept.example$' "$DHF")"
+eq "discover write: adds the discovered targets"   "yes" "$(grep -qx 'a@1.1.1.1' "$DHF" && grep -qx 'b@2.2.2.2' "$DHF" && echo yes || echo no)"
+_discw "$DHF" 'c@3.3.3.3' >/dev/null
+eq "discover write: replaces the managed block, not appends" "0" "$(grep -c '^a@1.1.1.1$' "$DHF")"
+eq "discover write: the rewrite still keeps hand lines"      "1" "$(grep -c '^hand@kept.example$' "$DHF")"
+eq "discover write: hosts inventory reads both hand + block" "$(printf 'hand@kept.example\nc@3.3.3.3')" "$(_hosts_parse < "$DHF")"
+rm -f "$DHF"
+
+# shellcheck disable=SC2120
+_discover() { ( _need() { :; }; _uint() { :; }
+  _ts_inventory() { printf '100.0.0.9\tself-box\tlinux\tself\n100.0.0.1\tlinbox\tlinux\tonline\n100.0.0.2\twinbox\twindows\tonline\n'; }
+  _ssh_config_aliases() { return 0; }
+  _ssh_resolve() { printf 'ruser\t%s\t' "$1"; }
+  _host_probe() { case "$1" in ruser@100.0.0.1) printf 'ruser@100.0.0.1\tonline\tlinux\tok\tyes' ;; *) printf '%s\toffline\t?\tunreach\t-' "$1" ;; esac; }
+  command() { case "$1" in -v) return 1 ;; *) builtin command "$@" ;; esac; }
+  cmd_discover "$@" ) 2>&1; }
+eq "discover: a windows peer is a win target, not probed" "yes" \
+   "$(case "$(_discover)" in *winbox*windows*) echo yes ;; *) echo no ;; esac)"
+eq "discover: self is excluded from the table" "no" \
+   "$(case "$(_discover)" in *self-box*) echo yes ;; *) echo no ;; esac)"
+eq "discover: a reachable linux is drivable"   "yes" \
+   "$(case "$(_discover)" in *linbox*ruser@100.0.0.1*drivable*) echo yes ;; *) echo no ;; esac)"
+
 _stoppeer() { ( _need() { :; }; _pbn; _resolve_pane() { printf '%%7'; }; _self_pane() { return 1; }
   tmux() { printf 'TMUX[%s]\n' "$*"; return 0; }
   cmd_stop "$1" ) 2>&1; }
