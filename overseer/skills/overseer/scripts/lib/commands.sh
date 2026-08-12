@@ -1177,3 +1177,119 @@ cmd_provision() {
   printf '%s: %s\n' "$host" "$out"
   return "$rc"
 }
+_xdg_hosts() { printf '%s/overseer/hosts' "${XDG_CONFIG_HOME:-$HOME/.config}"; }
+_discover_class() {
+  local sshv="$1" os="$2" drive="$3"
+  case "$sshv" in
+    ok)
+      case "$os" in
+        linux) case "$drive" in yes) printf drivable ;; *) printf needs-deps ;; esac ;;
+        windows) printf windows ;;
+        *) printf unknown ;;
+      esac ;;
+    deny|hostkey) printf gap ;;
+    *) printf unreachable ;;
+  esac
+}
+_discover_write() {
+  local file="$1"; shift
+  local dir tmpf
+  local begin='# >>> overseer discover (managed) — regenerate with: overseer discover --write'
+  local end='# <<< overseer discover'
+  dir=$(dirname "$file")
+  mkdir -p "$dir" 2>/dev/null || _die "cannot create $dir"
+  tmpf=$(mktemp "$file.XXXXXX") || _die "cannot write near $file"
+  if [ -f "$file" ]; then
+    awk -v b="$begin" -v e="$end" '$0==b{skip=1;next} $0==e{skip=0;next} !skip' "$file" > "$tmpf"
+  fi
+  { printf '%s\n' "$begin"; [ "$#" -gt 0 ] && printf '%s\n' "$@"; printf '%s\n' "$end"; } >> "$tmpf"
+  mv "$tmpf" "$file" || _die "could not update $file"
+}
+cmd_discover() {
+  _need ssh; _need jq
+  local write=0 probe=1 usetail=1 timeout=6 defuser="${OVERSEER_HOSTS_USER:-}" osfilter=''
+  local u='usage: overseer discover [--write] [--no-probe] [--no-tailscale] [--os NAME] [-u USER] [-t seconds]'
+  while :; do case "${1:-}" in
+    --write) write=1; shift ;;
+    --no-probe) probe=0; shift ;;
+    --no-tailscale) usetail=0; shift ;;
+    --os) [ -n "${2:-}" ] || _die "$u"; osfilter="$2"; shift 2 ;;
+    -u) [ -n "${2:-}" ] || _die "$u"; defuser="$2"; shift 2 ;;
+    -t) [ -n "${2:-}" ] || _die "$u"; timeout="$2"; shift 2 ;;
+    -*) _die "unknown flag '$1' ($u)" ;;
+    *) break ;;
+  esac; done
+  _uint "$timeout"
+  local ts=''
+  [ "$usetail" = 1 ] && command -v tailscale >/dev/null 2>&1 && ts=$(tailscale status 2>/dev/null || true)
+  local selfip='' ip name os state
+  declare -A CAND_NAME CAND_OS CAND_STATE TNET_OS
+  local -a order=()
+  while IFS=$'\t' read -r ip name os state; do
+    [ -n "$ip" ] || continue
+    [ "$state" = self ] && { selfip="$ip"; continue; }
+    TNET_OS[$ip]="$os"
+    [ "$usetail" = 1 ] || continue
+    [ -n "$osfilter" ] && [ "$os" != "$osfilter" ] && continue
+    [ -n "${CAND_NAME[$ip]:-}" ] && continue
+    CAND_NAME[$ip]="$name"; CAND_OS[$ip]="$os"; CAND_STATE[$ip]="$state"; order+=("$ip")
+  done < <(_ts_inventory)
+  local alias chost aos
+  while IFS= read -r alias; do
+    [ -n "$alias" ] || continue
+    IFS=$'\t' read -r _ chost _ < <(_ssh_resolve "$alias") || true
+    [ -n "$chost" ] || chost="$alias"
+    [ "$chost" = "$selfip" ] && continue
+    [ -n "${CAND_NAME[$chost]:-}" ] && continue
+    aos="${TNET_OS[$chost]:-?}"
+    [ -n "$osfilter" ] && [ "$aos" != '?' ] && [ "$aos" != "$osfilter" ] && continue
+    CAND_NAME[$chost]="$alias"; CAND_OS[$chost]="$aos"; CAND_STATE[$chost]='?'; order+=("$chost")
+  done < <(_ssh_config_aliases)
+  [ "${#order[@]}" -gt 0 ] || _die "no remote machines found (no tailnet peers and no ssh-config Host entries). Add Host entries to ~/.ssh/config, or run on a machine with tailscale."
+  local -a rows=() writes=() wins=() gaps=()
+  local target ruser rhost sshv rd n_drive=0 n_win=0 n_gap=0 class note probed
+  for ip in "${order[@]}"; do
+    name="${CAND_NAME[$ip]}"; os="${CAND_OS[$ip]}"; state="${CAND_STATE[$ip]}"
+    IFS=$'\t' read -r ruser rhost _ < <(_ssh_resolve "$ip") || true
+    [ -n "$ruser" ] || ruser="${defuser:-$(id -un)}"
+    target="$ruser@$ip"
+    if [ "$os" = windows ]; then
+      class=windows; note='drive with: overseer win <host>'
+      rows+=("$(printf '%s\t%s\t%s\t%s\t%s' "$name" "$target" "$os" "$class" "$note")")
+      wins+=("# win: $target ($name)"); n_win=$((n_win + 1)); continue
+    fi
+    if [ "$probe" = 1 ]; then
+      probed=$(_host_probe "$target" "$timeout" "$ts")
+      IFS=$'\t' read -r target state os sshv rd <<< "$probed"
+      class=$(_discover_class "$sshv" "$os" "$rd")
+    else
+      class=resolved; sshv='?'; rd='?'
+    fi
+    case "$class" in
+      drivable) note='ready'; writes+=("$target"); n_drive=$((n_drive + 1)) ;;
+      needs-deps) note="missing deps ($rd) — overseer provision $target"; writes+=("$target"); n_drive=$((n_drive + 1)) ;;
+      windows) note='drive with: overseer win <host>'; wins+=("# win: $target ($name)"); n_win=$((n_win + 1)) ;;
+      gap) note='ssh auth failed — tell overseer the user/key for this host'; gaps+=("$target"); n_gap=$((n_gap + 1)) ;;
+      unreachable) note='no route / offline' ;;
+      resolved) note='not probed (ssh -G only)' ;;
+      *) note='' ;;
+    esac
+    rows+=("$(printf '%s\t%s\t%s\t%s\t%s' "$name" "$target" "$os" "$class" "$note")")
+  done
+  printf 'NAME\tTARGET\tOS\tSTATUS\tNOTE\n'
+  printf '%s\n' "${rows[@]}"
+  printf '\n%s drivable, %s windows (win target), %s gap(s) needing your input\n' "$n_drive" "$n_win" "$n_gap"
+  if [ "$n_gap" -gt 0 ]; then
+    printf 'gaps (ssh failed — give the right user@host or key, or set up ssh access): %s\n' "${gaps[*]}"
+  fi
+  local hf; hf=$(_xdg_hosts)
+  if [ "$write" = 1 ]; then
+    local -a block=("# generated $(date -u +%Y-%m-%dT%H:%M:%SZ)")
+    [ "${#writes[@]}" -gt 0 ] && block+=("${writes[@]}")
+    [ "${#wins[@]}" -gt 0 ] && block+=("${wins[@]}")
+    _discover_write "$hf" "${block[@]}"
+    printf 'wrote %s drivable host(s) to %s (used by: overseer hosts, overseer fleet --hosts)\n' "$n_drive" "$hf"
+  else
+    printf 'add --write to save the %s drivable host(s) into %s\n' "$n_drive" "$hf"
+  fi
+}

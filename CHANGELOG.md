@@ -5,6 +5,24 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.46.0] - 2026-08-12
+
+### Added
+
+- **`overseer discover` — self-find the reachable remote inventory instead of hand-writing a hosts
+  file.** It enumerates candidates from every tailnet peer (`tailscale status`) and every non-wildcard
+  `Host` alias in `~/.ssh/config` *and its `Include`d files*, resolves each through `ssh -G` (so the
+  effective user, hostname and identity come from your ssh config — the single source of truth, never a
+  guess), probes reachability/OS/drive-ability, and classes each machine: `drivable`, `needs-deps`
+  (reachable but missing `tmux`/`jq`), `windows` (a `win <host>` target), `gap` (ssh could not
+  authenticate — you supply the user/key), `unreachable`, or `self`. `--write` persists the drivable
+  `user@ip` lines into `$XDG_CONFIG_HOME/overseer/hosts` inside a managed block that preserves
+  hand-written lines — the same file `hosts`/`fleet --hosts` read first, so one `discover --write`
+  wires the fleet. `--no-probe` resolves statically, `--no-tailscale` uses ssh config only. The command
+  is the investigation primitive; the skill's agentic loop asks the user about `gap`/`unreachable`
+  hosts and guides `provision`/ssh-key setup before writing. Generic by construction — a machine's real
+  users/IPs live only in the local hosts file it generates, never in the plugin.
+
 ## [0.45.1] - 2026-08-12
 
 ### Fixed
