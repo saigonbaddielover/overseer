@@ -5,6 +5,27 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.47.0] - 2026-08-12
+
+### Added
+
+- **`discover` now reads every host source on the machine, not just `~/.ssh/config`.** Candidates are
+  gathered from: tailnet peers; `Host` aliases in the user ssh config **and** the system
+  `/etc/ssh/ssh_config` **and** every `Include`d file (Include expansion is now base-directory aware, so
+  a relative include resolves against its own file's dir); `known_hosts` unhashed entries (user +
+  `known_hosts.old`/`known_hosts2` + the global `/etc/ssh/ssh_known_hosts`, with `[host]:port` stripped);
+  shell history ssh targets (bash/zsh/fish, flags skipped); and docker `ssh://` context endpoints. A new
+  **`SOURCE`** column shows where each row came from (`tailnet+ssh-config+known_hosts`). `--etc-hosts`
+  additionally scans `/etc/hosts` (off by default — an ad-block hosts file would flood it).
+- **A `user@` recorded in a source is used as the login hint.** When a docker endpoint or a history line
+  carries `user@host`, discover probes as that user instead of the `ssh -G` local-login fallback — it
+  uses what the operator already recorded rather than guessing, while ssh config still wins where it sets
+  a `User`.
+- **Hashed `known_hosts` are cross-checked, not "cracked".** A hashed entry is a one-way HMAC and cannot
+  be reversed to a hostname; instead every candidate found in another source is verified against
+  `known_hosts` with `ssh-keygen -F`, so a host you have connected to before is tagged `known_hosts`
+  even when the file is hashed. A MagicDNS FQDN from `known_hosts` now dedupes against its tailnet IP.
+
 ## [0.46.0] - 2026-08-12
 
 ### Added

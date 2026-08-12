@@ -436,11 +436,33 @@ eq "discover write: the rewrite still keeps hand lines"      "1" "$(grep -c '^ha
 eq "discover write: hosts inventory reads both hand + block" "$(printf 'hand@kept.example\nc@3.3.3.3')" "$(_hosts_parse < "$DHF")"
 rm -f "$DHF"
 
+eq "known_hosts: an unhashed name is extracted, [host]:port stripped, hashed skipped" \
+   "$(printf 'a.example\nb.example')" \
+   "$( TH=$(mktemp -d); mkdir -p "$TH/.ssh"
+       printf '|1|abcd=|efgh= ssh-ed25519 AAAA\na.example ssh-ed25519 AAAA\n[b.example]:2222 ssh-rsa BBBB\n# comment\n' > "$TH/.ssh/known_hosts"
+       ( _known_hosts_files() { printf '%s\n' "$TH/.ssh/known_hosts"; }; HOME="$TH" _known_hosts_names ); rm -rf "$TH" )"
+eq "history: ssh targets are extracted, flags skipped" \
+   "$(printf 'sandbox@1.2.3.4\nbox.example')" \
+   "$( TH=$(mktemp -d)
+       printf 'ls -la\nssh -p 22 -i ~/.ssh/id sandbox@1.2.3.4 uptime\nssh box.example\ncat file\n' > "$TH/.bash_history"
+       ( HOME="$TH" _history_ssh_targets ); rm -rf "$TH" )"
+eq "docker: an ssh:// context endpoint yields user@host" "deploy@dockerhost" \
+   "$( ( docker() { printf 'ssh://deploy@dockerhost\nunix:///var/run/docker.sock\n'; }
+        command() { case "$1 $2" in '-v docker') return 0 ;; *) builtin command "$@" ;; esac; }
+        _docker_ssh_hosts ) )"
+eq "etc-hosts: real hosts kept, localhost/adblock junk dropped" \
+   "$(printf 'lab.internal\ngpu.box')" \
+   "$( TH=$(mktemp)
+       printf '127.0.0.1 localhost\n0.0.0.0 ads.tracker.com\n10.0.0.5 lab.internal gpu.box\n::1 ip6-localhost\n' > "$TH"
+       _etc_hosts_names "$TH"; rm -f "$TH" )"
+
 # shellcheck disable=SC2120
 _discover() { ( _need() { :; }; _uint() { :; }
-  _ts_inventory() { printf '100.0.0.9\tself-box\tlinux\tself\n100.0.0.1\tlinbox\tlinux\tonline\n100.0.0.2\twinbox\twindows\tonline\n'; }
+  _ts_inventory() { printf '100.0.0.9\tself-box\tlinux\tself\t\n100.0.0.1\tlinbox\tlinux\tonline\tlinbox.ts.net\n100.0.0.2\twinbox\twindows\tonline\t\n'; }
   _ssh_config_aliases() { return 0; }
-  _ssh_resolve() { printf 'ruser\t%s\t' "$1"; }
+  _known_hosts_names() { return 0; }; _history_ssh_targets() { return 0; }
+  _docker_ssh_hosts() { return 0; }; _etc_hosts_names() { return 0; }; _khost_present() { return 1; }
+  _ssh_resolve() { printf 'ruser\t%s\t\n' "$1"; }
   _host_probe() { case "$1" in ruser@100.0.0.1) printf 'ruser@100.0.0.1\tonline\tlinux\tok\tyes' ;; *) printf '%s\toffline\t?\tunreach\t-' "$1" ;; esac; }
   command() { case "$1" in -v) return 1 ;; *) builtin command "$@" ;; esac; }
   cmd_discover "$@" ) 2>&1; }
@@ -450,6 +472,21 @@ eq "discover: self is excluded from the table" "no" \
    "$(case "$(_discover)" in *self-box*) echo yes ;; *) echo no ;; esac)"
 eq "discover: a reachable linux is drivable"   "yes" \
    "$(case "$(_discover)" in *linbox*ruser@100.0.0.1*drivable*) echo yes ;; *) echo no ;; esac)"
+eq "discover: the table carries a SOURCE column" "yes" \
+   "$(case "$(_discover)" in *'SOURCE'*STATUS*) echo yes ;; *) echo no ;; esac)"
+
+# shellcheck disable=SC2120
+_dischint() { ( _need() { :; }; _uint() { :; }
+  _ts_inventory() { return 0; }
+  _ssh_config_aliases() { return 0; }
+  _known_hosts_names() { return 0; }; _history_ssh_targets() { printf 'deploy@10.9.9.9\n'; }
+  _docker_ssh_hosts() { return 0; }; _etc_hosts_names() { return 0; }; _khost_present() { return 1; }
+  _ssh_resolve() { printf 'localfallback\t%s\t\n' "$1"; }
+  _host_probe() { printf '%s\tonline\tlinux\tok\tyes' "$1"; }
+  command() { case "$1" in -v) return 1 ;; *) builtin command "$@" ;; esac; }
+  cmd_discover --no-tailscale "$@" ) 2>&1; }
+eq "discover: a user@ from a source is the login hint, not the ssh -G fallback" "yes" \
+   "$(case "$(_dischint)" in *deploy@10.9.9.9*) echo yes ;; *localfallback@10.9.9.9*) echo no ;; *) echo no ;; esac)"
 
 _stoppeer() { ( _need() { :; }; _pbn; _resolve_pane() { printf '%%7'; }; _self_pane() { return 1; }
   tmux() { printf 'TMUX[%s]\n' "$*"; return 0; }

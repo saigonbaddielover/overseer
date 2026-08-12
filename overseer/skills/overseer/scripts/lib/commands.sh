@@ -1205,14 +1205,24 @@ _discover_write() {
   { printf '%s\n' "$begin"; [ "$#" -gt 0 ] && printf '%s\n' "$@"; printf '%s\n' "$end"; } >> "$tmpf"
   mv "$tmpf" "$file" || _die "could not update $file"
 }
+_discover_sources() {
+  local etchosts="$1"
+  _ssh_config_aliases   | sed 's/$/\tssh-config/'
+  _known_hosts_names    | sed 's/$/\tknown_hosts/'
+  _history_ssh_targets  | sed 's/$/\thistory/'
+  _docker_ssh_hosts     | sed 's/$/\tdocker/'
+  [ "$etchosts" = 1 ] && _etc_hosts_names | sed 's/$/\t\/etc\/hosts/'
+  return 0
+}
 cmd_discover() {
   _need ssh; _need jq
-  local write=0 probe=1 usetail=1 timeout=6 defuser="${OVERSEER_HOSTS_USER:-}" osfilter=''
-  local u='usage: overseer discover [--write] [--no-probe] [--no-tailscale] [--os NAME] [-u USER] [-t seconds]'
+  local write=0 probe=1 usetail=1 etchosts=0 timeout=6 defuser="${OVERSEER_HOSTS_USER:-}" osfilter=''
+  local u='usage: overseer discover [--write] [--no-probe] [--no-tailscale] [--etc-hosts] [--os NAME] [-u USER] [-t seconds]'
   while :; do case "${1:-}" in
     --write) write=1; shift ;;
     --no-probe) probe=0; shift ;;
     --no-tailscale) usetail=0; shift ;;
+    --etc-hosts) etchosts=1; shift ;;
     --os) [ -n "${2:-}" ] || _die "$u"; osfilter="$2"; shift 2 ;;
     -u) [ -n "${2:-}" ] || _die "$u"; defuser="$2"; shift 2 ;;
     -t) [ -n "${2:-}" ] || _die "$u"; timeout="$2"; shift 2 ;;
@@ -1222,40 +1232,53 @@ cmd_discover() {
   _uint "$timeout"
   local ts=''
   [ "$usetail" = 1 ] && command -v tailscale >/dev/null 2>&1 && ts=$(tailscale status 2>/dev/null || true)
-  local selfip='' ip name os state
-  declare -A CAND_NAME CAND_OS CAND_STATE TNET_OS
+  local selfip='' ip name os state dns
+  declare -A CAND_NAME CAND_OS CAND_STATE CAND_SRC CAND_HINT TNET_OS TNET_ALIAS
   local -a order=()
-  while IFS=$'\t' read -r ip name os state; do
+  while IFS=$'\t' read -r ip name os state dns; do
     [ -n "$ip" ] || continue
+    [ -n "$name" ] && [ "$name" != '?' ] && TNET_ALIAS[$name]="$ip"
+    [ -n "$dns" ] && TNET_ALIAS[$dns]="$ip"
     [ "$state" = self ] && { selfip="$ip"; continue; }
     TNET_OS[$ip]="$os"
     [ "$usetail" = 1 ] || continue
     [ -n "$osfilter" ] && [ "$os" != "$osfilter" ] && continue
     [ -n "${CAND_NAME[$ip]:-}" ] && continue
-    CAND_NAME[$ip]="$name"; CAND_OS[$ip]="$os"; CAND_STATE[$ip]="$state"; order+=("$ip")
+    CAND_NAME[$ip]="$name"; CAND_OS[$ip]="$os"; CAND_STATE[$ip]="$state"; CAND_SRC[$ip]=tailnet; order+=("$ip")
   done < <(_ts_inventory)
-  local alias chost aos
-  while IFS= read -r alias; do
-    [ -n "$alias" ] || continue
-    IFS=$'\t' read -r _ chost _ < <(_ssh_resolve "$alias") || true
-    [ -n "$chost" ] || chost="$alias"
+  local raw src rawhost hint chost aos
+  while IFS=$'\t' read -r raw src; do
+    [ -n "$raw" ] || continue
+    case "$raw" in *@*) hint="${raw%@*}"; rawhost="${raw##*@}" ;; *) hint=''; rawhost="$raw" ;; esac
+    if [ -n "${TNET_ALIAS[$rawhost]:-}" ]; then chost="${TNET_ALIAS[$rawhost]}"
+    else IFS=$'\t' read -r _ chost _ < <(_ssh_resolve "$rawhost") || true; fi
+    [ -n "$chost" ] || chost="$rawhost"
     [ "$chost" = "$selfip" ] && continue
-    [ -n "${CAND_NAME[$chost]:-}" ] && continue
+    if [ -n "${CAND_NAME[$chost]:-}" ]; then
+      case "${CAND_SRC[$chost]}" in *"$src"*) : ;; *) CAND_SRC[$chost]="${CAND_SRC[$chost]}+$src" ;; esac
+      [ -z "${CAND_HINT[$chost]:-}" ] && [ -n "$hint" ] && CAND_HINT[$chost]="$hint"
+      continue
+    fi
     aos="${TNET_OS[$chost]:-?}"
     [ -n "$osfilter" ] && [ "$aos" != '?' ] && [ "$aos" != "$osfilter" ] && continue
-    CAND_NAME[$chost]="$alias"; CAND_OS[$chost]="$aos"; CAND_STATE[$chost]='?'; order+=("$chost")
-  done < <(_ssh_config_aliases)
-  [ "${#order[@]}" -gt 0 ] || _die "no remote machines found (no tailnet peers and no ssh-config Host entries). Add Host entries to ~/.ssh/config, or run on a machine with tailscale."
+    CAND_NAME[$chost]="$rawhost"; CAND_OS[$chost]="$aos"; CAND_STATE[$chost]='?'
+    CAND_SRC[$chost]="$src"; [ -n "$hint" ] && CAND_HINT[$chost]="$hint"; order+=("$chost")
+  done < <(_discover_sources "$etchosts")
+  [ "${#order[@]}" -gt 0 ] || _die "no remote machines found in any source (tailnet, ssh config incl. system + Include, known_hosts, shell history, docker contexts). Add Host entries to ~/.ssh/config, or run on a machine with tailscale."
   local -a rows=() writes=() wins=() gaps=()
-  local target ruser rhost sshv rd n_drive=0 n_win=0 n_gap=0 class note probed
+  local target ruser rhost sshv rd n_drive=0 n_win=0 n_gap=0 class note probed source
   for ip in "${order[@]}"; do
-    name="${CAND_NAME[$ip]}"; os="${CAND_OS[$ip]}"; state="${CAND_STATE[$ip]}"
-    IFS=$'\t' read -r ruser rhost _ < <(_ssh_resolve "$ip") || true
-    [ -n "$ruser" ] || ruser="${defuser:-$(id -un)}"
+    name="${CAND_NAME[$ip]}"; os="${CAND_OS[$ip]}"; source="${CAND_SRC[$ip]}"
+    case "$source" in *known_hosts*) : ;; *) _khost_present "$ip" && source="$source+known_hosts" ;; esac
+    ruser="${CAND_HINT[$ip]:-}"
+    if [ -z "$ruser" ]; then
+      IFS=$'\t' read -r ruser rhost _ < <(_ssh_resolve "$ip") || true
+      [ -n "$ruser" ] || ruser="${defuser:-$(id -un)}"
+    fi
     target="$ruser@$ip"
     if [ "$os" = windows ]; then
       class=windows; note='drive with: overseer win <host>'
-      rows+=("$(printf '%s\t%s\t%s\t%s\t%s' "$name" "$target" "$os" "$class" "$note")")
+      rows+=("$(printf '%s\t%s\t%s\t%s\t%s\t%s' "$name" "$target" "$os" "$source" "$class" "$note")")
       wins+=("# win: $target ($name)"); n_win=$((n_win + 1)); continue
     fi
     if [ "$probe" = 1 ]; then
@@ -1274,9 +1297,9 @@ cmd_discover() {
       resolved) note='not probed (ssh -G only)' ;;
       *) note='' ;;
     esac
-    rows+=("$(printf '%s\t%s\t%s\t%s\t%s' "$name" "$target" "$os" "$class" "$note")")
+    rows+=("$(printf '%s\t%s\t%s\t%s\t%s\t%s' "$name" "$target" "$os" "$source" "$class" "$note")")
   done
-  printf 'NAME\tTARGET\tOS\tSTATUS\tNOTE\n'
+  printf 'NAME\tTARGET\tOS\tSOURCE\tSTATUS\tNOTE\n'
   printf '%s\n' "${rows[@]}"
   printf '\n%s drivable, %s windows (win target), %s gap(s) needing your input\n' "$n_drive" "$n_win" "$n_gap"
   if [ "$n_gap" -gt 0 ]; then
