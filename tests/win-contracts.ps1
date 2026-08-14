@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
-$scripts = Join-Path (Split-Path -Parent $here) 'overseer/skills/overseer/scripts'
+$scripts = Join-Path (Split-Path -Parent $here) 'plugins/overseer/skills/overseer/scripts'
 $fail = 0
 $onWindows = ($null -eq $IsWindows) -or $IsWindows
 if (-not $env:ProgramData) { $env:ProgramData = [IO.Path]::GetTempPath() }

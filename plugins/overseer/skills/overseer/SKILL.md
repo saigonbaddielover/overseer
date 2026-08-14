@@ -1,5 +1,6 @@
 ---
-description: Read or drive ANOTHER live agent process from outside it — a running Claude Code or Codex session, or a plain shell — in a local or remote Linux tmux pane, or in a console window on a remote WINDOWS machine over SSH. Use when the user wants to see the latest conversation of a claude or codex they are watching, send a message / reply on their behalf to it, run a command turn-based in a shell they are watching, list which tmux panes are running what agent, create or tear down a Linux tmux session running a shell/claude/codex (start/stop), or start/drive/stop a claude, codex or pwsh on a Windows PC's visible desktop (win <host> start/chat/sh/read/stop). read/chat/send/wait/list auto-detect the harness (Claude Code or Codex). Overseer itself runs on a Linux controller; its targets are Linux tmux panes (local or over ssh) and remote native Windows console brokers. Local pane discovery is Linux + tmux only; a plain non-tmux Linux terminal cannot be driven.
+name: overseer
+description: Read or drive ANOTHER live agent process from outside it — a running Claude Code or Codex session, or a plain shell — in a local or remote Linux tmux pane, or in a console window on a remote WINDOWS machine over SSH. Use when the user wants to see the latest conversation of a claude or codex they are watching, send a message / reply on their behalf to it, run a command turn-based in a shell they are watching, list which tmux panes are running what agent, create or tear down a Linux tmux session running a shell/claude/codex (start/stop), or start/drive/stop a claude, codex or pwsh on a Windows PC's visible desktop (win HOST start/chat/sh/read/stop). read/chat/send/wait/list auto-detect the harness (Claude Code or Codex). Overseer itself runs on a Linux controller; its targets are Linux tmux panes (local or over ssh) and remote native Windows console brokers. Local pane discovery is Linux + tmux only; a plain non-tmux Linux terminal cannot be driven.
 ---
 
 # overseer — read and drive a live tmux pane (Claude Code, Codex, or a plain shell)
@@ -21,11 +22,19 @@ Ctrl-C, which would quit Codex when it is idle; a Codex **approval prompt** is a
 key via `keys` (`y` approve once, `a` approve for session, `d` deny). Support for more harnesses is
 added behind these same commands.
 
-All work goes through one bundled script:
+All work goes through one bundled script. Resolve its **absolute** path first — never derive it from
+the workspace CWD — then call it. In **Claude Code** the plugin root is already in the environment:
 
 ```
-bash "${CLAUDE_PLUGIN_ROOT}/skills/overseer/scripts/overseer" <command> [args]
+OVERSEER_BIN="${CLAUDE_PLUGIN_ROOT}/skills/overseer/scripts/overseer"
+bash "$OVERSEER_BIN" <command> [args]
 ```
+
+In **Codex** no such variable exists: your skills catalog lists this skill with the absolute path of
+this very `SKILL.md`; take the directory that file sits in and set
+`OVERSEER_BIN="<that directory>/scripts/overseer"`.
+Either way the shell does not carry state between tool calls, so **repeat the assignment in every
+command** that uses it — an unset `OVERSEER_BIN` runs `bash ""` and fails.
 
 `<target>` is either a tmux pane id (`%3`) or a session/window name (**its active pane** — so every
 command acts on the same one pane; in a split window, target a background claude pane by its `%N`).
@@ -57,7 +66,7 @@ from stdin.
 | `provision [--dry-run] <host>` | **Remote (SSH).** Install the missing Linux **drive** deps (`tmux`+`jq`) on a reachable host — the fix for a `hosts` `DRIVE=no:tmux`/`no:jq`. Detects the package manager (`apt`/`dnf`/`yum`/`pacman`/`zypper`/`apk`), installs only what's absent (idempotent), needs **root or passwordless `sudo`** (runs non-interactively). `--dry-run` prints the command instead of running it. Linux base deps only — Claude/Codex agents and every Windows prerequisite are set up by hand. | **SIDE EFFECT** (installs packages on the remote) |
 | `deploy <host>` | **Remote (SSH).** Copy overseer's `scripts/` to `~/.overseer` on a remote ssh host (via `ssh`+`tar`), so `on <host> …` can run there. `<host>` is any ssh target — `user@host`, a `~/.ssh/config` alias, or a Tailscale MagicDNS name. Rarely needed by hand — `on` auto-deploys on first use; call `deploy` to **update** a host after changing overseer. | **SIDE EFFECT** (writes `~/.overseer` on the remote) |
 | `on <host> <command> [args]` | **Remote (SSH).** Run any overseer command on a remote host over ssh — the *whole* program executes remote-side, where its tmux / `/proc` / transcript reads co-locate, so discovery and completion detection work unchanged; only the invocation and the result cross the wire. **Auto-deploys on first use** (a cheap `[ -f ]` probe over the master the real command reuses runs `deploy` once if `~/.overseer` is absent — default layout only; `OVERSEER_NO_AUTODEPLOY=1` or a custom `OVERSEER_REMOTE_BIN` disables it). A blocking `chat`/`wait`/`sh` holds one ssh connection while it polls remote-side (no new event protocol — the remote's own hook markers/transcript are the truth); one-shots reuse a multiplexed master (`ControlMaster`+`ControlPersist`). Pass `--yes` for remote auto-submit — the interactive confirm has no tty over ssh. e.g. `on sandbox chat %0 'hi'`, `on sandbox doctor`. | inherits the wrapped command's safety |
-| `win <host>[/name] <verb>` | **Remote (SSH), Windows target.** Drive a remote Windows **console broker** over plain ssh — the `win` prefix is to a Windows host what `on <host>` is to a remote Linux one. `<host>[/name]` picks the broker (`/name` runs several side by side); `<verb>` is one of the shared verbs in the table just below (**same vocabulary as the Linux commands**). A plain-SSH Windows host has no tmux; the broker is the tmux stand-in — a **visible** console child (pwsh/claude/codex) exposing a machine-wide named pipe (reachable from the invisible SSH Session 0) speaking `WriteConsoleInput`/`ReadConsoleOutputCharacter` (= `send-keys`/`capture-pane`). Needs an **admin** ssh login. Full rationale: [docs/WINDOWS.md](../../../docs/WINDOWS.md). | verbs vary (see below) |
+| `win <host>[/name] <verb>` | **Remote (SSH), Windows target.** Drive a remote Windows **console broker** over plain ssh — the `win` prefix is to a Windows host what `on <host>` is to a remote Linux one. `<host>[/name]` picks the broker (`/name` runs several side by side); `<verb>` is one of the shared verbs in the table just below (**same vocabulary as the Linux commands**). A plain-SSH Windows host has no tmux; the broker is the tmux stand-in — a **visible** console child (pwsh/claude/codex) exposing a machine-wide named pipe (reachable from the invisible SSH Session 0) speaking `WriteConsoleInput`/`ReadConsoleOutputCharacter` (= `send-keys`/`capture-pane`). Needs an **admin** ssh login. Full rationale: [docs/WINDOWS.md](https://github.com/saigonbaddielover/sgbl-overseer/blob/main/docs/WINDOWS.md). | verbs vary (see below) |
 
 `chat`/`send`/`wait`/`read` are for an agent TUI — Claude Code or Codex — and read its transcript to
 know a turn ended (auto-detected per pane). `sh` is for a plain shell (it appends a unique sentinel
@@ -70,7 +79,8 @@ never interleave. It is verified before submit: an exact match when it fits on o
 that wrapped). Pipe long prompts in:
 
 ```
-bash "${CLAUDE_PLUGIN_ROOT}/skills/overseer/scripts/overseer" chat --yes <target> - <<'EOF'
+OVERSEER_BIN="${CLAUDE_PLUGIN_ROOT}/skills/overseer/scripts/overseer"
+bash "$OVERSEER_BIN" chat --yes <target> - <<'EOF'
 first paragraph of a long prompt...
 
 more lines...
@@ -162,7 +172,7 @@ user's machine), not here. To make such a terminal drivable, run it inside tmux.
 discovery** (`list`, `%N` targets) is likewise Linux + tmux only — it reads `/proc`.
 
 Windows prerequisites, the trust boundary, and the security notes live in
-[docs/WINDOWS.md](../../../docs/WINDOWS.md); read it before running any `win <host> <verb>` command.
+[docs/WINDOWS.md](https://github.com/saigonbaddielover/sgbl-overseer/blob/main/docs/WINDOWS.md); read it before running any `win <host> <verb>` command.
 
 ## Remote hosts (SSH / Tailscale)
 
@@ -198,7 +208,7 @@ overseer on sandbox sh %3 'git pull'          # or drive a remote shell pane
   `SSH=hostkey` → accept the key (`StrictHostKeyChecking accept-new`); `SSH=unreach` → host/net down.
   `DRIVE=no:tmux`/`no:jq` → **`overseer provision <host>`** installs the base deps (root/passwordless
   sudo; `--dry-run` to preview), then re-survey; `DRIVE=win*` → drive it with `win <host> <verb>` (admin +
-  console user + [WINDOWS.md](docs/WINDOWS.md) prereqs). `provision` does Linux base deps only — agents
+  console user + [WINDOWS.md](https://github.com/saigonbaddielover/sgbl-overseer/blob/main/docs/WINDOWS.md) prereqs). `provision` does Linux base deps only — agents
   and Windows prereqs are manual.
 - The `on`/`deploy` path is **Linux-only** (overseer itself needs `/proc` + tmux, so it can't run on a
   Windows host). A **Windows** machine in the tailnet is a first-class target through the `win <host>
@@ -359,7 +369,7 @@ WHOLE thing, do not stop at the first screen. The reliable loop:
    command can never land in a chat box, but is otherwise unrestricted). The broker's named pipe is the
    trust boundary: its random name and auth token live in an ACL'd descriptor on the host — **never
    print, log, or relay a broker descriptor**. Prerequisites and the full model:
-   [docs/WINDOWS.md](../../../docs/WINDOWS.md).
+   [docs/WINDOWS.md](https://github.com/saigonbaddielover/sgbl-overseer/blob/main/docs/WINDOWS.md).
 8. **`start` spawns a process; `stop` destroys a session.** `start` opens a new detached tmux session
    running a shell or agent; `stop` kills a `%N` pane or a whole named session and its child. Both are
    side effects on the user's machine — run them only when the user asked to create or tear down a
@@ -440,7 +450,7 @@ WHOLE thing, do not stop at the first screen. The reliable loop:
   message anyway (they resolve the transcript once the turn begins); a bare `read`/`wait` still needs a
   completed turn to read.
 
-## Event mode (bundled hooks — faster `chat`/`wait`/`send`)
+## Event mode (Claude Code hooks — faster `chat`/`wait`/`send`)
 
 By default the readers poll the transcript (correct, ~2s worst-case latency). To wake on events, the
 plugin ships three hooks, all routed through one script (`hooks/hooks.json` →
@@ -453,8 +463,8 @@ plugin ships three hooks, all routed through one script (`hooks/hooks.json` →
 - `Notification` → `~/.claude/awaiting/<session_id>` — Claude raised a permission/menu prompt, so
   `chat`/`wait` look at the screen the moment it appears.
 
-**All three are wired automatically when the plugin is installed** — no `settings.json` editing. A
-user-scope install covers every session; there is no project-scope walk-up caveat.
+**All three are wired automatically by the Claude Code plugin install** — no `settings.json` editing.
+Codex plugin installs do not load these Claude hooks and use the polling fallback described below.
 
 Each hook only writes an mtime marker (files are reused per session, and markers idle for over a week
 are swept by a prune that runs at most once every 24h — no unbounded growth). They are
@@ -484,12 +494,13 @@ installed just polls — the same safe fallback, ~2s slower, never blocked.
 
 ## Install
 
-Distributed as a Claude Code plugin. From inside Claude Code:
+Distributed as a Claude Code and Codex plugin. Claude Code:
 
 ```
 /plugin marketplace add saigonbaddielover/sgbl-overseer
 /plugin install overseer@sgbl
 ```
 
-This installs the skill, the `overseer` script, and the turn-done hook together (the hook is wired
-automatically — see Event mode). Requirements and safety notes are in the repo `README.md`.
+Codex: `codex plugin marketplace add saigonbaddielover/sgbl-overseer`, then
+`codex plugin add overseer@sgbl`; open a new thread to load the skill. Both install the skill and
+script; only Claude Code loads the event hooks. Requirements and safety notes are in `README.md`.

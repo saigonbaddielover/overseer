@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
-LIB="$HERE/../overseer/skills/overseer/scripts/lib"
+LIB="$HERE/../plugins/overseer/skills/overseer/scripts/lib"
 FIX="$HERE/fixtures"
 export CLAUDE_HOME="$HERE/.home" CODEX_HOME="$HERE/.home"
 
-# shellcheck source=../overseer/skills/overseer/scripts/lib/transcript.sh
+# shellcheck source=../plugins/overseer/skills/overseer/scripts/lib/transcript.sh
 . "$LIB/transcript.sh"
-# shellcheck source=../overseer/skills/overseer/scripts/lib/tui.sh
+# shellcheck source=../plugins/overseer/skills/overseer/scripts/lib/tui.sh
 . "$LIB/tui.sh"
-# shellcheck source=../overseer/skills/overseer/scripts/lib/discovery.sh
+# shellcheck source=../plugins/overseer/skills/overseer/scripts/lib/discovery.sh
 . "$LIB/discovery.sh"
 _die() { printf 'overseer: %s\n' "$1" >&2; exit 1; }
-# shellcheck source=../overseer/skills/overseer/scripts/lib/windows.sh
+# shellcheck source=../plugins/overseer/skills/overseer/scripts/lib/windows.sh
 . "$LIB/windows.sh"
-# shellcheck source=../overseer/skills/overseer/scripts/lib/commands.sh
+# shellcheck source=../plugins/overseer/skills/overseer/scripts/lib/commands.sh
 . "$LIB/commands.sh"
 
 fail=0
@@ -884,9 +884,9 @@ eq "win_field absent tx"   ""                                "$(_win_field "$INF
 eq "win_field alive False" "False"                           "$(_win_field "$INFO" alive)"
 eq "win_sig no transcript" ":"                               "$(_win_sig "$INFO")"
 
-ENTRY="$HERE/../overseer/skills/overseer/scripts/overseer"
+ENTRY="$HERE/../plugins/overseer/skills/overseer/scripts/overseer"
 README="$HERE/../README.md"
-SKILL="$HERE/../overseer/skills/overseer/SKILL.md"
+SKILL="$HERE/../plugins/overseer/skills/overseer/SKILL.md"
 
 _dispatch_cmds() { sed -nE 's/^[[:space:]]+([a-z]+)\)[[:space:]]+cmd_.*/\1/p' "$ENTRY" | sort -u; }
 _help_cmds()     { bash "$ENTRY" --help 2>/dev/null | sed -nE 's/^  ([a-z]+)[[:space:]]+[<[].*/\1/p' | sort -u; }
@@ -907,14 +907,14 @@ for surface in help README SKILL; do
   eq "$surface documents no command that does not exist" "" "$(printf '%s' "$extra" | sed 's/ *$//')"
 done
 
-WINLIB="$HERE/../overseer/skills/overseer/scripts/lib/windows.sh"
+WINLIB="$HERE/../plugins/overseer/skills/overseer/scripts/lib/windows.sh"
 _win_verbs_dispatch() { sed -nE 's/^[[:space:]]+([a-z]+)\)[[:space:]]+_win_.*/\1/p' "$WINLIB" | sort -u; }
 _win_verbs_help()     { bash "$ENTRY" --help 2>/dev/null | sed -nE 's/^[[:space:]]+win verbs:[[:space:]]*(.*)/\1/p' | tr ' ' '\n' | sed '/^$/d' | sort -u; }
 eq "win dispatcher verbs are non-empty" "yes" "$([ -n "$(_win_verbs_dispatch)" ] && echo yes || echo no)"
 eq "help win verbs match the cmd_win dispatcher" "" \
    "$(comm -3 <(_win_verbs_dispatch) <(_win_verbs_help) | tr -d '\t' | tr '\n' ' ' | sed 's/ *$//')"
 
-CMDLIB="$HERE/../overseer/skills/overseer/scripts/lib/commands.sh"
+CMDLIB="$HERE/../plugins/overseer/skills/overseer/scripts/lib/commands.sh"
 _fleet_acts_dispatch() { sed -nE '/^_fleet_local\(\)/,/^\}/ s/^[[:space:]]{4}([a-z|]+)\).*/\1/p' "$CMDLIB" | tr '|' '\n' | sed '/^\*$/d;/^$/d' | sort -u; }
 _fleet_acts_help()     { bash "$ENTRY" --help 2>/dev/null | sed -nE 's/^  fleet .*\[(status\|.*)\] \[args\].*/\1/p' | head -1 | sed -E 's/\[[^]]*\]//g' | tr '|' '\n' | sed -E 's/^ +| +$//g' | sed '/^$/d' | sort -u; }
 eq "fleet dispatcher actions are non-empty" "yes" "$([ -n "$(_fleet_acts_dispatch)" ] && echo yes || echo no)"
@@ -930,13 +930,45 @@ _has() { grep -qF "$2" "$1" && echo yes || echo no; }
 _hasre() { grep -qE "$2" "$1" && echo yes || echo no; }
 
 eq "README states the Linux controller / Windows target support model" "yes" "$(_hasre "$README" '^## Support model')"
-eq "SKILL frontmatter names the Windows broker commands" "yes" "$(sed -n '2p' "$SKILL" | grep -qE 'win <host>.*(start|chat)' && echo yes || echo no)"
+eq "SKILL frontmatter has the Codex-required name" "yes" "$(sed -n '/^---$/,/^---$/p' "$SKILL" | grep -qF 'name: overseer' && echo yes || echo no)"
+eq "SKILL frontmatter names the Windows broker commands" "yes" "$(sed -n '/^---$/,/^---$/p' "$SKILL" | grep -qE 'win HOST.*(start|chat)' && echo yes || echo no)"
+eq "SKILL resolves one portable runner" "yes" "$(_has "$SKILL" 'bash "$OVERSEER_BIN" <command> [args]')"
+eq "SKILL assigns OVERSEER_BIN from the Claude plugin root" "yes" \
+   "$(_has "$SKILL" 'OVERSEER_BIN="${CLAUDE_PLUGIN_ROOT}/skills/overseer/scripts/overseer"')"
+eq "SKILL tells Codex where to get the same absolute path" "yes" "$(_hasre "$SKILL" 'absolute path of')"
+
+_md_blocks_using_bin_without_assigning() {
+  awk '
+    /^```/ { inb = !inb; if (inb) { buf = "" } else if (buf ~ /bash "\$OVERSEER_BIN"/ && buf !~ /OVERSEER_BIN=/) n++; next }
+    inb { buf = buf $0 "\n" }
+    END { print n + 0 }
+  ' "$1"
+}
+eq "every SKILL code block calling OVERSEER_BIN assigns it first" "0" "$(_md_blocks_using_bin_without_assigning "$SKILL")"
+
+_md_links_unreachable_from_an_install() {
+  local pkg base link target n=0
+  base=$(dirname "$1")
+  pkg=$(cd "$base/../.." && pwd)
+  for link in $(grep -oE '\]\([^)[:space:]]+\)' "$1" | sed -E 's/^\]\(//; s/\)$//'); do
+    case "$link" in
+      http://*|https://*|'#'*) continue ;;
+    esac
+    target=$(cd "$base" 2>/dev/null && realpath -m "${link%%#*}") || { n=$((n + 1)); continue; }
+    case "$target" in
+      "$pkg"/*) [ -e "$target" ] || n=$((n + 1)) ;;
+      *) n=$((n + 1)) ;;
+    esac
+  done
+  printf '%s' "$n"
+}
+eq "every SKILL link is absolute or inside the plugin package" "0" "$(_md_links_unreachable_from_an_install "$SKILL")"
 eq "SKILL scope section covers both target kinds" "yes" "$(_hasre "$SKILL" '^## Scope: what runs where')"
 for v in OVERSEER_REMOTE_DIR OVERSEER_REMOTE_BIN OVERSEER_NO_AUTODEPLOY OVERSEER_SSH OVERSEER_SSH_OPTS OVERSEER_SCP OVERSEER_WIN_CLAUDE OVERSEER_WIN_CODEX OVERSEER_TIMEOUT OVERSEER_POLL_INTERVAL; do
   eq "README documents $v" "yes" "$(_has "$README" "$v")"
 done
 
-ENTRYLIB="$HERE/../overseer/skills/overseer/scripts/lib"
+ENTRYLIB="$HERE/../plugins/overseer/skills/overseer/scripts/lib"
 eq "README quotes the real no-agent-pane error" "yes" "$(_has "$README" 'no agent pane (claude/codex) for target')"
 eq "that error string still exists in the code" "yes" "$(_has "$ENTRYLIB/commands.sh" 'no agent pane (claude/codex) for target')"
 eq "README does not claim overseer opens panes" "no" "$(_hasre "$README" 'opens \(or attaches\) a tmux pane|launches an agent harness')"

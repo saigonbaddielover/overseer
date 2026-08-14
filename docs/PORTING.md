@@ -8,7 +8,7 @@ on a Mac implements and *live-verifies* it (the project's core rule: verificatio
 ## The OS seam
 
 All `/proc` access is funnelled through **four functions** in
-`overseer/skills/overseer/scripts/lib/discovery.sh`. They dispatch on `$OVERSEER_OS` (set once from
+`plugins/overseer/skills/overseer/scripts/lib/discovery.sh`. They dispatch on `$OVERSEER_OS` (set once from
 `uname -s`, overridable via the `OVERSEER_OS` env var for testing). Only the `Linux` branch exists; every
 other platform returns non-zero, so discovery reports "no agent pane" instead of reading a `/proc` that
 isn't there.

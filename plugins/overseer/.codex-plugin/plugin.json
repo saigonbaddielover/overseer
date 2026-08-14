@@ -1,0 +1,40 @@
+{
+  "name": "overseer",
+  "version": "0.52.0",
+  "description": "Drive and read other Claude Code, Codex, and shell sessions in Linux tmux panes or remote Windows consoles.",
+  "author": {
+    "name": "saigonbaddielover",
+    "url": "https://github.com/saigonbaddielover"
+  },
+  "homepage": "https://github.com/saigonbaddielover/sgbl-overseer",
+  "repository": "https://github.com/saigonbaddielover/sgbl-overseer",
+  "license": "MIT",
+  "keywords": [
+    "tmux",
+    "claude-code",
+    "codex",
+    "session-control",
+    "agent-coordination",
+    "windows",
+    "ssh"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "overseer",
+    "shortDescription": "Drive and read live coding-agent sessions",
+    "longDescription": "Read, message, wait for, and manage Claude Code, Codex, and shell sessions in local or remote Linux tmux panes and native Windows consoles over SSH.",
+    "developerName": "saigonbaddielover",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/saigonbaddielover/sgbl-overseer",
+    "defaultPrompt": [
+      "List the Claude Code and Codex sessions I can reach.",
+      "Read the latest reply from the agent in my other tmux pane.",
+      "Send this task to the Codex session named worker and wait for its reply."
+    ]
+  }
+}

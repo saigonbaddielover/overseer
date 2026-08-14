@@ -5,8 +5,8 @@
 
 **One agent that oversees others.** Drive and read other agent sessions — and plain shells —
 turn-based, from outside them: in **Linux tmux panes** (local or over ssh) and in **native Windows
-console windows** on a remote machine's visible desktop. Packaged as a
-[Claude Code plugin](https://code.claude.com/docs/en/plugins).
+console windows** on a remote machine's visible desktop. Packaged as an installable plugin for
+**Claude Code and [Codex](https://developers.openai.com/codex/build-plugins)**.
 
 On Linux, overseer both **drives sessions someone else started** and **starts/stops its own**: `list`
 discovers a tmux pane already running Claude Code, Codex or a shell and reads/drives it turn-based, while
@@ -56,23 +56,34 @@ server-side.
   The local tmux commands need none of these.
 - **bash ≥ 4.1** — the script uses named file descriptors and associative arrays; stock macOS bash 3.2
   is too old (install a newer bash and run overseer under it).
-- **Claude Code** — this is a plugin for it.
-- **Codex** *(optional)* — to drive Codex panes as well; Claude-only setups need nothing extra.
+- **Claude Code or Codex** — either can install the skill and act as the controller agent.
+- Install the Claude Code and Codex CLIs only for the kinds of target sessions you want `start` or
+  discovery to manage.
 
 ## Install
 
-From inside Claude Code:
+For Claude Code, run inside Claude Code:
 
 ```
 /plugin marketplace add saigonbaddielover/sgbl-overseer
 /plugin install overseer@sgbl
 ```
 
-That installs the skill, the `overseer` script, and the turn-done hook together (make sure the
-requirements above are present). Then just ask Claude things like *"read the latest from the claude in
-my other tmux pane"* or *"reply to it with X"* — the skill triggers on its own.
+For Codex, run in a shell:
+
+```
+codex plugin marketplace add saigonbaddielover/sgbl-overseer
+codex plugin add overseer@sgbl
+```
+
+Both install the same skill and `overseer` script. Claude Code also installs the turn-event hooks;
+Codex uses the script's transcript polling fallback. Start a new Codex thread after installation so
+the new skill is loaded, then ask things like *"read the latest from the codex in my other tmux pane"*
+or *"reply to it with X"*.
 
 ## Updating
+
+Claude Code:
 
 ```
 /plugin marketplace update sgbl   # re-fetch the marketplace from GitHub
@@ -80,10 +91,22 @@ my other tmux pane"* or *"reply to it with X"* — the skill triggers on its own
 /reload-plugins                   # activate it in the current session — no restart
 ```
 
+Codex:
+
+```
+codex plugin marketplace upgrade sgbl
+codex plugin add overseer@sgbl
+```
+
+Open a new Codex thread after updating.
+
 ## Commands
 
-All work goes through one script; the agent calls it as
-`bash "${CLAUDE_PLUGIN_ROOT}/skills/overseer/scripts/overseer" <command> [args]`.
+All work goes through the bundled `skills/overseer/scripts/overseer` script, called by its absolute
+path: Claude Code has the plugin root in the environment, so the agent runs
+`bash "${CLAUDE_PLUGIN_ROOT}/skills/overseer/scripts/overseer" <command> [args]`; Codex has no such
+variable and uses the installed skill's own directory instead. From a source checkout, run
+`plugins/overseer/skills/overseer/scripts/overseer <command> [args]`.
 `<target>` is a tmux pane id (`%3`) or a session/window name (its active pane).
 
 | Command | Effect |
@@ -427,7 +450,7 @@ Codex needs none of this: it writes `rate_limits` into every rollout already.
 
 ## Compatibility
 
-Last verified live against **Claude Code 2.1.217** and **Codex 0.144.6**. Because overseer reads each
+Last verified live against **Claude Code 2.1.232** and **Codex 0.147.0**. Because overseer reads each
 agent's internal on-disk layout (above), an upstream update *could* change that layout and break
 discovery. Rather than pin exact versions, `overseer doctor` prints the running versions and then
 *probes the contract directly*: it runs overseer's own transcript readers against the newest on-disk
@@ -442,6 +465,7 @@ Run the preflight first:
 
 ```
 overseer doctor        # or: bash "$CLAUDE_PLUGIN_ROOT/skills/overseer/scripts/overseer" doctor
+                       # checkout: plugins/overseer/skills/overseer/scripts/overseer doctor
 ```
 
 - **"no agent pane (claude/codex) for target"** → the pane isn't running Claude Code or Codex, or you
@@ -455,9 +479,9 @@ overseer doctor        # or: bash "$CLAUDE_PLUGIN_ROOT/skills/overseer/scripts/o
 
 ## Uninstall
 
-```
-/plugin uninstall overseer@sgbl
-```
+Claude Code: `/plugin uninstall overseer@sgbl`.
+
+Codex: `codex plugin remove overseer@sgbl`.
 
 ## Development
 
@@ -468,6 +492,9 @@ git clone https://github.com/saigonbaddielover/sgbl-overseer
 /plugin marketplace add ./sgbl-overseer
 /plugin install overseer@sgbl
 ```
+
+For Codex, use `codex plugin marketplace add ./sgbl-overseer`, then
+`codex plugin add overseer@sgbl`. Open a new thread after reinstalling the plugin.
 
 Validate locally (CI can't run `claude plugin validate` — the CLI isn't on the runner):
 

@@ -2,8 +2,8 @@
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/.." && pwd)
-O="$ROOT/overseer/skills/overseer/scripts/overseer"
-LIB="$ROOT/overseer/skills/overseer/scripts/lib"
+O="$ROOT/plugins/overseer/skills/overseer/scripts/overseer"
+LIB="$ROOT/plugins/overseer/skills/overseer/scripts/lib"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"; for s in "${SESS[@]:-}"; do [ -n "$s" ] && tmux kill-session -t "$s" 2>/dev/null; done' EXIT
 export CLAUDE_HOME="${CLAUDE_HOME:-$HOME/.claude}"

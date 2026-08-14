@@ -5,6 +5,23 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.52.0] - 2026-08-14
+
+### Added
+
+- **Codex can install and use overseer as a native plugin.** The shared package now carries a Codex
+  manifest, a repo marketplace entry, Codex skill UI metadata, and a valid `name` in the skill
+  frontmatter. `codex plugin marketplace add saigonbaddielover/sgbl-overseer` followed by
+  `codex plugin add overseer@sgbl` installs the same skill and scripts Claude Code uses.
+
+### Changed
+
+- **The plugin moved to the cross-product `plugins/overseer/` layout.** Both marketplaces point at one
+  package, so the Claude Code and Codex distributions cannot drift into separate script copies.
+- **The skill resolves its runner through the active harness.** Claude Code still uses
+  `$CLAUDE_PLUGIN_ROOT`; Codex resolves the script relative to the installed skill. Claude Code keeps
+  its bundled event hooks, while Codex uses the existing transcript-polling fallback.
+
 ## [0.51.0] - 2026-08-14
 
 ### Added

@@ -5,8 +5,8 @@
 ## Checklist
 
 - [ ] `bash -n` and `shellcheck -S warning` pass on any changed scripts
-- [ ] `claude plugin validate --strict ./overseer` passes (and `claude plugin validate --strict .` for the marketplace)
-- [ ] For a releasable change: bumped `version` in **both** `overseer/.claude-plugin/plugin.json` and the `.claude-plugin/marketplace.json` entry (they must agree)
+- [ ] Claude and Codex plugin validators pass for `./plugins/overseer`
+- [ ] For a releasable change: bumped `version` in both plugin manifests and the Claude marketplace entry (they must agree)
 - [ ] Updated `CHANGELOG.md` (under `Unreleased`)
 - [ ] `bash tests/run.sh` passes
 - [ ] `overseer doctor` still passes on a Linux + tmux box

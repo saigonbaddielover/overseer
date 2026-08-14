@@ -2,14 +2,16 @@
 
 ## Layout
 
-- `overseer/` — the plugin: `.claude-plugin/plugin.json`, `skills/overseer/` (the skill + `scripts/`), `hooks/`.
+- `plugins/overseer/` — the shared Claude Code/Codex plugin: both manifests,
+  `skills/overseer/` (the skill + `scripts/`), and Claude Code `hooks/`.
 - `skills/overseer/scripts/overseer` — the entry point (config, `main`, help); it sources `scripts/lib/`:
   `discovery.sh` (pane → harness → transcript path), `transcript.sh` (Claude + Codex readers, turn-done),
   `tui.sh` (screen read + keyboard/paste delivery), `commands.sh` (the local + ssh `cmd_*` surface),
   `windows.sh` (the `win*` surface: broker payload transfer, pipe client, remote turn wait).
 - `skills/overseer/scripts/win-*.ps1` — the PowerShell payloads copied to a Windows host on demand;
   see [docs/WINDOWS.md](docs/WINDOWS.md) for the mechanism and its non-obvious constraints.
-- `.claude-plugin/marketplace.json` — the `sgbl` marketplace that lists the plugin.
+- `.claude-plugin/marketplace.json` and `.agents/plugins/marketplace.json` — the Claude Code and Codex
+  `sgbl` marketplaces that list the same plugin directory.
 
 ## Test locally (no publish)
 
@@ -26,18 +28,30 @@ picked up automatically or with `/reload-skills`; changes under `hooks/` need `/
 Remove with `/plugin uninstall overseer@sgbl --scope local` and
 `/plugin marketplace remove sgbl --scope local`.
 
+For Codex:
+
+```
+codex plugin marketplace add .
+codex plugin add overseer@sgbl
+```
+
+Open a new thread after install or reinstall so Codex loads the skill. Remove it with
+`codex plugin remove overseer@sgbl` and `codex plugin marketplace remove sgbl`.
+
 ## Validate before you push
 
 ```
-claude plugin validate --strict ./overseer   # the plugin
+claude plugin validate --strict ./plugins/overseer   # the plugin
 claude plugin validate --strict .             # the marketplace
-bash -n overseer/skills/overseer/scripts/overseer overseer/skills/overseer/scripts/lib/*.sh
-shellcheck -x -S warning overseer/skills/overseer/scripts/overseer   # -x follows the sourced lib/*.sh
-shellcheck -S warning overseer/hooks/turn-done.sh
+python3 "${CODEX_HOME:-$HOME/.codex}/skills/.system/plugin-creator/scripts/validate_plugin.py" plugins/overseer
+python3 "${CODEX_HOME:-$HOME/.codex}/skills/.system/skill-creator/scripts/quick_validate.py" plugins/overseer/skills/overseer
+bash -n plugins/overseer/skills/overseer/scripts/overseer plugins/overseer/skills/overseer/scripts/lib/*.sh
+shellcheck -x -S warning plugins/overseer/skills/overseer/scripts/overseer   # -x follows the sourced lib/*.sh
+shellcheck -S warning plugins/overseer/hooks/turn-done.sh
 bash tests/run.sh                                  # parser fixture tests (no tmux needed)
 bash tests/win-flow.sh                             # win* orchestration, mocked ssh
 bash tests/win-payloads.sh                         # the same two .ps1 files CI's windows job runs (needs pwsh)
-overseer/skills/overseer/scripts/overseer doctor --live   # runtime preflight + throwaway-pane round trip
+plugins/overseer/skills/overseer/scripts/overseer doctor --live   # runtime preflight + throwaway-pane round trip
 ```
 
 ## Tests
@@ -89,7 +103,7 @@ CI (`.github/workflows/validate.yml`) runs three jobs on every push to `main` an
 
 | job | runner | steps |
 |---|---|---|
-| **validate** | ubuntu | `jq empty` on the three JSON manifests · plugin/marketplace version agreement · a CHANGELOG entry for a version bump (PRs only) · `bash -n` + shellcheck over the entry, `lib/*.sh`, the hook and every `tests/*.sh` · `tests/run.sh` · `tests/win-flow.sh` |
+| **validate** | ubuntu | `jq empty` on marketplace, plugin, and hook JSON · plugin/marketplace version agreement · a CHANGELOG entry for a version bump (PRs only) · `bash -n` + shellcheck over the entry, `lib/*.sh`, the hook and every `tests/*.sh` · `tests/run.sh` · `tests/win-flow.sh` |
 | **powershell** | windows | `tests/win-parse.ps1` · `tests/win-contracts.ps1`, both natively under `pwsh` |
 | **stress** | ubuntu | installs tmux, runs the harness-free subset of `tests/stress.sh` |
 
@@ -123,8 +137,8 @@ gh pr create --fill
 
 ## Release
 
-1. On a branch, bump `version` in **both** `overseer/.claude-plugin/plugin.json` and the
-   `.claude-plugin/marketplace.json` entry (they must match — CI and `claude plugin tag` enforce it).
+1. On a branch, bump `version` in both `plugins/overseer` manifests and the
+   `.claude-plugin/marketplace.json` entry (they must match — CI and release automation enforce it).
 2. Move the `Unreleased` notes in `CHANGELOG.md` under the new version + date. CI **fails the PR** if the
    version changed without a matching `## [x.y.z]` heading.
 3. Open the PR, get CI green, merge to `main`.
@@ -133,13 +147,14 @@ That is the whole flow — **tagging and releasing are automatic**. On every pus
 workflow reads the plugin version and, if `overseer--v<version>` does not already exist, creates the tag
 and publishes the GitHub Release. It is idempotent: a merge that doesn't bump the version is a no-op.
 
-You can still cut a tag by hand (`claude plugin tag ./overseer --push`) — `autotag` sees the tag already
+You can still cut a tag by hand (`claude plugin tag ./plugins/overseer --push`) — `autotag` sees the tag already
 exists and stands down, and the `release` workflow handles that path. Note `autotag` publishes the
 release itself rather than leaning on `release.yml`, because a tag pushed by a workflow using the default
 `GITHUB_TOKEN` deliberately does not trigger further workflows.
 
-Users update with `/plugin marketplace update sgbl` + `/plugin update overseer` + `/reload-plugins`
-(no restart).
+Claude Code users update with `/plugin marketplace update sgbl` + `/plugin update overseer` +
+`/reload-plugins`. Codex users run `codex plugin marketplace upgrade sgbl` followed by
+`codex plugin add overseer@sgbl`, then open a new thread.
 
 ## Style
 

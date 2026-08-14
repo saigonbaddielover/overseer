@@ -95,7 +95,7 @@ up later; leave them as the standing answer and say nothing about macOS otherwis
 through the interactive `/plugin` menu in the TUI: type `/plugin`, pick the plugin, choose Update.
 `/reload-plugins` afterward (or a restart) loads the new code — it only re-reads on-disk code, it does
 not git-pull the marketplace clone, so it never bumps the version. Verify with
-`jq -r .version ~/.claude/plugins/marketplaces/sgbl/overseer/.claude-plugin/plugin.json`.
+`jq -r .version ~/.claude/plugins/marketplaces/sgbl/plugins/overseer/.claude-plugin/plugin.json`.
 
 **`autoUpdate: true` does not help the session you are in.** The `sgbl` marketplace entry in
 `~/.claude/settings.json` has `"autoUpdate": true` and is configured correctly — but a *running* session
@@ -336,7 +336,7 @@ with a PowerShell-created scheduled task. Three gotchas, all hit and solved:
 
 **Shipped as `overseer winshow <host> [app]` in v0.7.0 (PR #34)** — the plugin's one Windows-facing
 command (overseer itself can't run on Windows). Launcher payload =
-`overseer/skills/overseer/scripts/win-show.ps1`; `cmd_winshow` pipes it over ssh stdin to a tiny
+`plugins/overseer/skills/overseer/scripts/win-show.ps1`; `cmd_winshow` pipes it over ssh stdin to a tiny
 EncodedCommand bootstrap that writes it to a temp file and runs `powershell -File` (dodging the cmd
 8191-char limit that killed the encode-whole-script approach), filters output to the one `OK`/`ERR` line,
 and uses `ServerAliveInterval` + 3× retry for the flaky relay. Two more gotchas: `MainWindowHandle` is
@@ -370,7 +370,7 @@ ends).
 
 Landed as six commands (pre-0.21.0 names) — `winbroker <host> [pwsh|claude|codex] [workdir]` `winpeek`
 `winkeys` `winsh` `winchat` `winstop` — plus three payloads under
-`overseer/skills/overseer/scripts/`:
+`plugins/overseer/skills/overseer/scripts/`:
 
 - `win-broker.ps1` — the Session-1 broker: ConIO `Add-Type` + named pipe + child sharing the console.
   `Resolve-StartDir` reads Windows Terminal `settings.json`'s default `startingDirectory`, so the
