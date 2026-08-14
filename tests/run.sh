@@ -935,7 +935,7 @@ eq "SKILL frontmatter names the Windows broker commands" "yes" "$(sed -n '/^---$
 eq "SKILL resolves one portable runner" "yes" "$(_has "$SKILL" 'bash "$OVERSEER_BIN" <command> [args]')"
 eq "SKILL assigns OVERSEER_BIN from the Claude plugin root" "yes" \
    "$(_has "$SKILL" 'OVERSEER_BIN="${CLAUDE_PLUGIN_ROOT}/skills/overseer/scripts/overseer"')"
-eq "SKILL tells Codex where to get the same absolute path" "yes" "$(_hasre "$SKILL" 'skill roots table')"
+eq "SKILL tells Codex where to get the same absolute path" "yes" "$(_hasre "$SKILL" 'absolute path of')"
 
 _md_blocks_using_bin_without_assigning() {
   awk '
@@ -946,15 +946,23 @@ _md_blocks_using_bin_without_assigning() {
 }
 eq "every SKILL code block calling OVERSEER_BIN assigns it first" "0" "$(_md_blocks_using_bin_without_assigning "$SKILL")"
 
-_md_dead_relative_links() {
-  local base link n=0
+_md_links_unreachable_from_an_install() {
+  local pkg base link target n=0
   base=$(dirname "$1")
-  for link in $(grep -o '(\.\./[^)]*)' "$1" | tr -d '()'); do
-    [ -e "$base/$link" ] || n=$((n + 1))
+  pkg=$(cd "$base/../.." && pwd)
+  for link in $(grep -oE '\]\([^)[:space:]]+\)' "$1" | sed -E 's/^\]\(//; s/\)$//'); do
+    case "$link" in
+      http://*|https://*|'#'*) continue ;;
+    esac
+    target=$(cd "$base" 2>/dev/null && realpath -m "${link%%#*}") || { n=$((n + 1)); continue; }
+    case "$target" in
+      "$pkg"/*) [ -e "$target" ] || n=$((n + 1)) ;;
+      *) n=$((n + 1)) ;;
+    esac
   done
   printf '%s' "$n"
 }
-eq "every relative link in SKILL resolves on disk" "0" "$(_md_dead_relative_links "$SKILL")"
+eq "every SKILL link is absolute or inside the plugin package" "0" "$(_md_links_unreachable_from_an_install "$SKILL")"
 eq "SKILL scope section covers both target kinds" "yes" "$(_hasre "$SKILL" '^## Scope: what runs where')"
 for v in OVERSEER_REMOTE_DIR OVERSEER_REMOTE_BIN OVERSEER_NO_AUTODEPLOY OVERSEER_SSH OVERSEER_SSH_OPTS OVERSEER_SCP OVERSEER_WIN_CLAUDE OVERSEER_WIN_CODEX OVERSEER_TIMEOUT OVERSEER_POLL_INTERVAL; do
   eq "README documents $v" "yes" "$(_has "$README" "$v")"
