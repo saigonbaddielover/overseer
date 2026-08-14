@@ -5,7 +5,8 @@
 # scratchpad (per workspace convention: <cwd>/.tmp/)
 .tmp/
 
-# local-only working notes + Claude Code project config (machine-specific); not shipped with the plugin
+# local-only working notes + Claude Code / Codex project config (machine-specific); not shipped with the plugin
 CLAUDE.md
+AGENTS.md
 .claude/
 .claude/worktrees/
