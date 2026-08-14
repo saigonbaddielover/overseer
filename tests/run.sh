@@ -356,16 +356,32 @@ cookie-importer keys+peer" \
    "$( ( _need() { :; }; _panes() { printf 'sess\t%%1\t111\tclaude\t/x\n'; }
         _peer_name_of() { printf 'cookie-importer'; }; _peer_sessions() { :; }
         cmd_list ) | cut -f1,2 | tr '\t' ' ' )"
+eq "list: a named pane with no peer socket shows its name, not a blank" "PEER REACH
+old-build keys+name" \
+   "$( ( _need() { :; }; _panes() { printf 'sess\t%%1\t111\tclaude\t/x\n'; }
+        _peer_name_of() { return 1; }; _peer_name_any() { printf 'old-build'; }; _peer_sessions() { :; }
+        cmd_list ) | cut -f1,2 | tr '\t' ' ' )"
+eq "list: a genuinely unnamed pane still reads as unnamed" "PEER REACH
+- keys" \
+   "$( ( _need() { :; }; _panes() { printf 'sess\t%%1\t111\tcodex\t/x\n'; }
+        _peer_name_of() { return 1; }; _peer_name_any() { return 1; }; _peer_sessions() { :; }
+        cmd_list ) | cut -f1,2 | tr '\t' ' ' )"
 
 PH="${TMPDIR:-/tmp}/ov-peers-$$"; mkdir -p "$PH/sessions"
 printf '{"name":"twin","tmux":"s:@1.%%1","messagingSocketPath":"/x/a.sock"}\n' >"$PH/sessions/1.json"
 printf '{"name":"twin","tmux":"s:@2.%%2","messagingSocketPath":"/x/b.sock"}\n' >"$PH/sessions/2.json"
 printf '{"name":"solo","tmux":"s:@3.%%3","messagingSocketPath":"/x/c.sock"}\n' >"$PH/sessions/3.json"
 printf '{"name":"gone","tmux":"s:@4.%%4","messagingSocketPath":""}\n'         >"$PH/sessions/4.json"
-_peers() { ( CLAUDE_HOME="$PH"; _peer_live() { [ -n "$1" ]; }; _pane_by_peer_name "$1" ); }
+printf '{"name":"headless-old","tmux":"","messagingSocketPath":""}\n'        >"$PH/sessions/5.json"
+_peers() { ( CLAUDE_HOME="$PH"; _peer_live() { [ -n "$1" ]; }; _p_comm() { :; }; _pane_by_peer_name "$1" ); }
 eq "peer name: a unique live name resolves to its pane"        "%3" "$(_peers solo)"
 eq "peer name: a duplicated name refuses instead of guessing"  "2"  "$(_peers twin >/dev/null 2>&1; echo $?)"
-eq "peer name: a session with no live socket is no candidate"  "1"  "$(_peers gone >/dev/null 2>&1; echo $?)"
+eq "peer name: a named pane with no peer socket is still a target (keys reach it)" \
+   "%4" "$(_peers gone)"
+eq "peer name: named, no pane and no socket is reachable by nothing" \
+   "4"  "$(_peers headless-old >/dev/null 2>&1; echo $?)"
+eq "peer name: a dead session's stale file is not a candidate" "1" \
+   "$( ( CLAUDE_HOME="$PH"; _peer_live() { [ -n "$1" ]; }; _p_comm() { return 1; }; _pane_by_peer_name solo ) >/dev/null 2>&1; echo $?)"
 rm -rf "$PH"
 eq "resolve: an ambiguous peer name never falls through to tmux" "1" \
    "$( ( _pane_by_peer_name() { return 2; }; tmux() { printf '%%99'; }; _resolve_pane twin ) >/dev/null 2>&1; echo $?)"
@@ -402,8 +418,20 @@ eq "stamp: a peer-capable target is told to reply on the peer channel" "yes" \
    "$(PEERTGT=0; case "$(_stamp hi)" in *'reply with the SendMessage tool to sender'*) echo yes ;; *) echo no ;; esac)"
 eq "stamp: an already-stamped message is not stamped twice" "[from: sender — x] hi" \
    "$(PEERTGT=1; _stamp '[from: sender — x] hi')"
-eq "stamp: overseer run by a human stamps nothing" "hi" \
-   "$( ( _self_peer_name() { return 1; }; _stamp_from hi %7 ) )"
+eq "stamp: overseer run by a human at a shell stamps nothing" "hi" \
+   "$( ( _self_peer_name() { return 1; }; _self_agent_pane() { return 1; }; _stamp_from hi %7 ) )"
+eq "stamp: an agent pane with no peer name is still stamped, by session and pane" "yes" \
+   "$( ( _self_peer_name() { return 1; }; _self_agent_pane() { return 0; }
+        TMUX_PANE=%4; tmux() { printf 'worker-sess'; }
+        case "$(_stamp_from hi %7)" in '[from: worker-sess %4 — another agent'*) echo yes ;; *) echo no ;; esac ) )"
+eq "stamp: that fallback carries a reply address too" "yes" \
+   "$( ( _self_peer_name() { return 1; }; _self_agent_pane() { return 0; }
+        TMUX_PANE=%4; tmux() { printf 'worker-sess'; }
+        case "$(_stamp_from hi %7)" in *"reply with: overseer send worker-sess '<text>'"*) echo yes ;; *) echo no ;; esac ) )"
+eq "self_agent_pane: a plain shell pane is not an agent caller" "1" \
+   "$( ( TMUX_PANE=%4; tmux() { printf '4242'; }; _harness_of() { return 1; }; _self_agent_pane ) >/dev/null 2>&1; echo $?)"
+eq "self_agent_pane: outside tmux there is no agent caller" "1" \
+   "$( ( unset TMUX_PANE; _self_agent_pane ) >/dev/null 2>&1; echo $?)"
 
 _guarded() { ( _die() { printf 'REFUSED %s\n' "$1"; exit 1; }
   tmux() { printf '1234'; }; _peer_name_of() { printf 'cookie-importer'; }

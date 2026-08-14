@@ -88,7 +88,7 @@ All work goes through one script; the agent calls it as
 
 | Command | Effect |
 |---|---|
-| `list [--all]` | **Every agent the harness knows**, led by **PEER** — the name Claude Code itself addresses a session by (`-` when it has none) — and **REACH**: `keys+peer` (a drivable tmux pane that also answers on the peer channel), `keys` (a Codex/unnamed pane), or `peer` (a live claude with **no tmux pane** — overseer cannot drive it, only `SendMessage` reaches it). Then session, pane, pids, **HARNESS** (claude/codex) and cwd. Every command takes that PEER name as its target, ahead of `%N` or a session name, and targeting a `peer`-only row tells you to use `SendMessage` instead of failing with "no tmux pane". `--all`: every pane + its foreground command. |
+| `list [--all]` | **Every agent the harness knows**, led by **PEER** — the name Claude Code itself addresses a session by (`-` when it has none) — and **REACH**: `keys+peer` (a drivable tmux pane that also answers on the peer channel), `keys+name` (the harness named it but it publishes no `messagingSocketPath`, so the peer channel is unavailable and only keystrokes reach it — the name is still a valid target; older Claude Code builds do not write that field), `keys` (a Codex/unnamed pane), or `peer` (a live claude with **no tmux pane** — overseer cannot drive it, only `SendMessage` reaches it). An empty `PEER` therefore means "this session really has no name", not "peer detection failed"; `doctor` reports how many named sessions publish no socket. Then session, pane, pids, **HARNESS** (claude/codex) and cwd. Every command takes that PEER name as its target, ahead of `%N` or a session name, and targeting a `peer`-only row tells you to use `SendMessage` instead of failing with "no tmux pane". `--all`: every pane + its foreground command. |
 | `read <target>` | Print the last user prompt + the reply **that belongs to it**, from the agent's transcript (Claude or Codex, auto-detected). It never hands back an older exchange dressed as the current one: while the turn is still running it says `(NO REPLY YET …)` instead of printing the previous reply, an API error is reported only when it ended *this* prompt's turn (a days-old quota error is no longer replayed onto every later read), and a transcript that records completed turns but yields no readable reply says `(NO READABLE REPLY …)` rather than silently degrading to older content. |
 | `peek [raw\|-e] <target> [lines]` | Dump the pane's current screen. `raw` (also `-e`/`--raw`) keeps ANSI colors (see the active tab/selection) and prints the whole screen; plain mode drops blank lines and honours `[lines]`. |
 | `chat [--yes] [--force-keys|--as-user] <target> <msg\|-> [timeout]` | **Agent (Claude/Codex).** Send, wait for the turn to finish, print the reply. If the agent is **busy or compacting**, the message is **queued** and `chat` waits for *its own* turn to complete (not the running one) before printing that reply. If the agent stops at a prompt, returns its question + how to answer instead; if the turn is **interrupted** it says so instead of waiting out the timeout (the message was delivered, so `peek` before resending). |
@@ -393,9 +393,15 @@ Codex needs none of this: it writes `rate_limits` into every rollout already.
 - **A keystroke is not a peer message, and `--as-user` deliberately erases the difference.** Typing into
   a Claude pane is recorded on the far side as `origin.kind=human` — indistinguishable from its own user
   at the keyboard — so `chat`/`send` **refuse** a target that has a **PEER** name and point at the
-  `SendMessage` tool, which the receiver records as an authenticated peer message. `--force-keys` takes
-  the keyboard anyway and prefixes the message with the sender's PEER name, that it comes from an agent
-  rather than the user, and how to reply; that prefix is a convention, not proof. **`--as-user`** implies
+  `SendMessage` tool, which the receiver records as an authenticated peer message — and the refusal says
+  so plainly: if *your* `SendMessage` cannot reach that name (it may only address agents your own session
+  spawned), `--force-keys` is the right call there, not a way around the guard. `--force-keys` takes
+  the keyboard anyway and prefixes the message with who sent it, that it comes from an agent
+  rather than the user, and how to reply; that prefix is a convention, not proof. **An agent caller that
+  has no PEER name of its own is stamped too** — with its tmux session and pane id, and `overseer send
+  <session>` as the reply address — because the forced delivery is exactly the one that most needs
+  provenance. A **human** running overseer from a plain shell pane is not stamped: the caller is
+  identified as an agent by its own pane running a harness, not by the absence of a name. **`--as-user`** implies
   `--force-keys` and drops the prefix, so the worker reads the message as its own user typing it and acts
   without stopping to confirm — which is the point when the user has delegated a dispatch ("send this as
   me") and does not want to re-approve it in every worker, and is why it is scoped to that case rather

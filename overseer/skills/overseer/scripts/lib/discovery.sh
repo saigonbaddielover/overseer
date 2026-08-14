@@ -60,28 +60,43 @@ _peer_name_of() {
   [ -n "$name" ] && _peer_live "$sock" || return 1
   printf '%s' "$name"
 }
+_peer_name_any() {
+  local apid name
+  apid=$(_agent_pid "$1") || return 1
+  name=$(_peer_field "$apid" name) || return 1
+  [ -n "$name" ] || return 1
+  printf '%s' "$name"
+}
 _peer_ambiguous() {
   _die "'$1' names more than one live claude session — target the one you mean by its pane id %N (see: overseer list)"
 }
 _peer_no_pane() {
   _die "'$1' is a live claude session with no tmux pane, so overseer cannot drive it — reach it on the harness peer channel with the SendMessage tool ({\"to\": \"$1\", ...}); see: overseer list"
 }
+_peer_unreachable() {
+  _die "'$1' is a live claude session with no tmux pane AND no messagingSocketPath, so neither overseer nor the SendMessage tool can reach it — start it inside a tmux pane to make it drivable; see: overseer list"
+}
 _pane_by_peer_name() {
-  local f name sock tgt hit='' n=0 nopane=0
+  local f pid name sock tgt hit='' n=0 nopane=0 nodrive=0
   command -v jq >/dev/null 2>&1 || return 1
   for f in "$CLAUDE_HOME"/sessions/*.json; do
     [ -f "$f" ] || continue
+    pid=$(basename "$f" .json)
+    _p_comm "$pid" >/dev/null 2>&1 || continue
     name=$(jq -r '.name // empty' "$f" 2>/dev/null) || continue
     [ "$name" = "$1" ] || continue
     sock=$(jq -r '.messagingSocketPath // empty' "$f" 2>/dev/null)
-    _peer_live "$sock" || continue
     tgt=$(jq -r '.tmux // empty' "$f" 2>/dev/null)
-    if [ -z "$tgt" ]; then nopane=$((nopane + 1)); continue; fi
+    if [ -z "$tgt" ]; then
+      if _peer_live "$sock"; then nopane=$((nopane + 1)); else nodrive=$((nodrive + 1)); fi
+      continue
+    fi
     hit="${tgt##*.}"; n=$((n + 1))
   done
   [ "$n" -le 1 ] || return 2
   [ -n "$hit" ] && { printf '%s' "$hit"; return 0; }
   [ "$nopane" = 0 ] || return 3
+  [ "$nodrive" = 0 ] || return 4
   return 1
 }
 _target_die() {
@@ -89,6 +104,7 @@ _target_die() {
   _pane_by_peer_name "$target" >/dev/null 2>&1 || rc=$?
   if [ "$rc" = 2 ]; then _peer_ambiguous "$target"; fi
   if [ "$rc" = 3 ]; then _peer_no_pane "$target"; fi
+  if [ "$rc" = 4 ]; then _peer_unreachable "$target"; fi
   _die "$generic"
 }
 _peer_sessions() {
