@@ -5,6 +5,22 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.53.0] - 2026-08-14
+
+### Fixed
+
+- **`send --notify` actually wakes the dispatching agent again.** The detached watcher inherited
+  `TMUX_PANE` from the command that spawned it and delivered the wake-up with a plain `send`, so
+  `_no_self` refused it as "the pane overseer is running in" and, past that, `_peer_guard` refused it
+  because a named Claude session is peer-reachable. Both errors went to `/dev/null`, so the watcher
+  died silently while `send --notify` had already promised the pane would be woken — an agent that
+  dispatched work and ended its turn was never called back. The watcher now clears `TMUX_PANE` and
+  passes `--force-keys`, which is the case that flag exists for: a detached shell has no
+  `SendMessage` tool to fall back on. Broken since 0.41.2, when `_no_self` was introduced.
+- The `--notify` tests mocked `OVERSEER_SELF` with a stub, so they exercised everything except the
+  delivery that was failing. They now run the real `_no_self` / `_peer_guard` pair and assert that
+  both refuse the pre-fix invocation and neither refuses the current one.
+
 ## [0.52.0] - 2026-08-14
 
 ### Added
