@@ -8,10 +8,10 @@
   "plugins": [
     {
       "name": "overseer",
-      "source": "./overseer",
+      "source": "./plugins/overseer",
       "category": "development",
       "description": "One agent that oversees others: drive/read other agent sessions (Claude Code, Codex) and shells, turn-based — in Linux tmux panes and in native Windows consoles over ssh. Linux controller.",
-      "version": "0.51.0",
+      "version": "0.52.0",
       "license": "MIT",
       "keywords": [
         "tmux",

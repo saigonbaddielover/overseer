@@ -1,5 +1,6 @@
 ---
-description: Read or drive ANOTHER live agent process from outside it — a running Claude Code or Codex session, or a plain shell — in a local or remote Linux tmux pane, or in a console window on a remote WINDOWS machine over SSH. Use when the user wants to see the latest conversation of a claude or codex they are watching, send a message / reply on their behalf to it, run a command turn-based in a shell they are watching, list which tmux panes are running what agent, create or tear down a Linux tmux session running a shell/claude/codex (start/stop), or start/drive/stop a claude, codex or pwsh on a Windows PC's visible desktop (win <host> start/chat/sh/read/stop). read/chat/send/wait/list auto-detect the harness (Claude Code or Codex). Overseer itself runs on a Linux controller; its targets are Linux tmux panes (local or over ssh) and remote native Windows console brokers. Local pane discovery is Linux + tmux only; a plain non-tmux Linux terminal cannot be driven.
+name: overseer
+description: Read or drive ANOTHER live agent process from outside it — a running Claude Code or Codex session, or a plain shell — in a local or remote Linux tmux pane, or in a console window on a remote WINDOWS machine over SSH. Use when the user wants to see the latest conversation of a claude or codex they are watching, send a message / reply on their behalf to it, run a command turn-based in a shell they are watching, list which tmux panes are running what agent, create or tear down a Linux tmux session running a shell/claude/codex (start/stop), or start/drive/stop a claude, codex or pwsh on a Windows PC's visible desktop (win HOST start/chat/sh/read/stop). read/chat/send/wait/list auto-detect the harness (Claude Code or Codex). Overseer itself runs on a Linux controller; its targets are Linux tmux panes (local or over ssh) and remote native Windows console brokers. Local pane discovery is Linux + tmux only; a plain non-tmux Linux terminal cannot be driven.
 ---
 
 # overseer — read and drive a live tmux pane (Claude Code, Codex, or a plain shell)
@@ -21,10 +22,12 @@ Ctrl-C, which would quit Codex when it is idle; a Codex **approval prompt** is a
 key via `keys` (`y` approve once, `a` approve for session, `d` deny). Support for more harnesses is
 added behind these same commands.
 
-All work goes through one bundled script:
+All work goes through one bundled script. In Claude Code, set `OVERSEER_BIN` from
+`${CLAUDE_PLUGIN_ROOT}`. In Codex, resolve `scripts/overseer` relative to this `SKILL.md` using the
+absolute skill location in the available-skills catalog. Never derive it from the workspace CWD.
 
 ```
-bash "${CLAUDE_PLUGIN_ROOT}/skills/overseer/scripts/overseer" <command> [args]
+bash "$OVERSEER_BIN" <command> [args]
 ```
 
 `<target>` is either a tmux pane id (`%3`) or a session/window name (**its active pane** — so every
@@ -70,7 +73,7 @@ never interleave. It is verified before submit: an exact match when it fits on o
 that wrapped). Pipe long prompts in:
 
 ```
-bash "${CLAUDE_PLUGIN_ROOT}/skills/overseer/scripts/overseer" chat --yes <target> - <<'EOF'
+bash "$OVERSEER_BIN" chat --yes <target> - <<'EOF'
 first paragraph of a long prompt...
 
 more lines...
@@ -440,7 +443,7 @@ WHOLE thing, do not stop at the first screen. The reliable loop:
   message anyway (they resolve the transcript once the turn begins); a bare `read`/`wait` still needs a
   completed turn to read.
 
-## Event mode (bundled hooks — faster `chat`/`wait`/`send`)
+## Event mode (Claude Code hooks — faster `chat`/`wait`/`send`)
 
 By default the readers poll the transcript (correct, ~2s worst-case latency). To wake on events, the
 plugin ships three hooks, all routed through one script (`hooks/hooks.json` →
@@ -453,8 +456,8 @@ plugin ships three hooks, all routed through one script (`hooks/hooks.json` →
 - `Notification` → `~/.claude/awaiting/<session_id>` — Claude raised a permission/menu prompt, so
   `chat`/`wait` look at the screen the moment it appears.
 
-**All three are wired automatically when the plugin is installed** — no `settings.json` editing. A
-user-scope install covers every session; there is no project-scope walk-up caveat.
+**All three are wired automatically by the Claude Code plugin install** — no `settings.json` editing.
+Codex plugin installs do not load these Claude hooks and use the polling fallback described below.
 
 Each hook only writes an mtime marker (files are reused per session, and markers idle for over a week
 are swept by a prune that runs at most once every 24h — no unbounded growth). They are
@@ -484,12 +487,13 @@ installed just polls — the same safe fallback, ~2s slower, never blocked.
 
 ## Install
 
-Distributed as a Claude Code plugin. From inside Claude Code:
+Distributed as a Claude Code and Codex plugin. Claude Code:
 
 ```
 /plugin marketplace add saigonbaddielover/sgbl-overseer
 /plugin install overseer@sgbl
 ```
 
-This installs the skill, the `overseer` script, and the turn-done hook together (the hook is wired
-automatically — see Event mode). Requirements and safety notes are in the repo `README.md`.
+Codex: `codex plugin marketplace add saigonbaddielover/sgbl-overseer`, then
+`codex plugin add overseer@sgbl`; open a new thread to load the skill. Both install the skill and
+script; only Claude Code loads the event hooks. Requirements and safety notes are in `README.md`.

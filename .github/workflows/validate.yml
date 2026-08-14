@@ -16,23 +16,33 @@ jobs:
       - name: JSON manifests are valid
         run: |
           for f in .claude-plugin/marketplace.json \
-                   overseer/.claude-plugin/plugin.json \
-                   overseer/hooks/hooks.json; do
+                   .agents/plugins/marketplace.json \
+                   plugins/overseer/.claude-plugin/plugin.json \
+                   plugins/overseer/.codex-plugin/plugin.json \
+                   plugins/overseer/hooks/hooks.json; do
             echo "jq: $f"; jq empty "$f"
           done
 
       - name: plugin.json and marketplace entry versions agree
         run: |
-          pv=$(jq -r .version overseer/.claude-plugin/plugin.json)
+          pv=$(jq -r .version plugins/overseer/.claude-plugin/plugin.json)
+          cv=$(jq -r .version plugins/overseer/.codex-plugin/plugin.json)
           mv=$(jq -r '.plugins[] | select(.name=="overseer") | .version' .claude-plugin/marketplace.json)
-          echo "plugin=$pv marketplace=$mv"
-          test -n "$pv" && test "$pv" = "$mv"
+          echo "claude=$pv codex=$cv marketplace=$mv"
+          test -n "$pv" && test "$pv" = "$cv" && test "$pv" = "$mv"
+
+      - name: Codex marketplace points at the shared plugin
+        run: |
+          test "$(jq -r '.plugins[] | select(.name=="overseer") | .source.path' .agents/plugins/marketplace.json)" = "./plugins/overseer"
+          test "$(jq -r .skills plugins/overseer/.codex-plugin/plugin.json)" = "./skills/"
 
       - name: a version bump must bring a CHANGELOG entry
         if: github.event_name == 'pull_request'
         run: |
-          pv=$(jq -r .version overseer/.claude-plugin/plugin.json)
-          base=$(git show "origin/${{ github.base_ref }}:overseer/.claude-plugin/plugin.json" 2>/dev/null | jq -r .version) || base=""
+          pv=$(jq -r .version plugins/overseer/.claude-plugin/plugin.json)
+          base=$(git show "origin/${{ github.base_ref }}:plugins/overseer/.claude-plugin/plugin.json" 2>/dev/null | jq -r .version) \
+            || base=$(git show "origin/${{ github.base_ref }}:overseer/.claude-plugin/plugin.json" 2>/dev/null | jq -r .version) \
+            || base=""
           if [ -z "$base" ]; then
             echo "no baseline plugin.json on origin/${{ github.base_ref }} — skipping"
           elif [ "$pv" = "$base" ]; then
@@ -46,17 +56,17 @@ jobs:
 
       - name: shell scripts parse and lint
         run: |
-          for f in overseer/skills/overseer/scripts/overseer \
-                   overseer/skills/overseer/scripts/lib/*.sh \
-                   overseer/hooks/turn-done.sh \
+          for f in plugins/overseer/skills/overseer/scripts/overseer \
+                   plugins/overseer/skills/overseer/scripts/lib/*.sh \
+                   plugins/overseer/hooks/turn-done.sh \
                    tests/run.sh \
                    tests/win-flow.sh \
                    tests/win-payloads.sh \
                    tests/stress.sh; do
             bash -n "$f"
           done
-          shellcheck -x -S warning overseer/skills/overseer/scripts/overseer
-          shellcheck -S warning overseer/hooks/turn-done.sh
+          shellcheck -x -S warning plugins/overseer/skills/overseer/scripts/overseer
+          shellcheck -S warning plugins/overseer/hooks/turn-done.sh
           shellcheck -S warning tests/run.sh
           shellcheck -S warning tests/win-flow.sh
           shellcheck -S warning tests/win-payloads.sh

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
-LIB="$HERE/../overseer/skills/overseer/scripts/lib"
+LIB="$HERE/../plugins/overseer/skills/overseer/scripts/lib"
 FIX="$HERE/fixtures"
 export CLAUDE_HOME="$HERE/.home" CODEX_HOME="$HERE/.home"
 # shellcheck disable=SC2034
@@ -12,13 +12,13 @@ _die() { printf 'overseer: %s\n' "$1" >&2; exit 1; }
 _uint() { :; }
 _nap() { :; }
 
-# shellcheck source=../overseer/skills/overseer/scripts/lib/transcript.sh
+# shellcheck source=../plugins/overseer/skills/overseer/scripts/lib/transcript.sh
 . "$LIB/transcript.sh"
-# shellcheck source=../overseer/skills/overseer/scripts/lib/tui.sh
+# shellcheck source=../plugins/overseer/skills/overseer/scripts/lib/tui.sh
 . "$LIB/tui.sh"
-# shellcheck source=../overseer/skills/overseer/scripts/lib/discovery.sh
+# shellcheck source=../plugins/overseer/skills/overseer/scripts/lib/discovery.sh
 . "$LIB/discovery.sh"
-# shellcheck source=../overseer/skills/overseer/scripts/lib/windows.sh
+# shellcheck source=../plugins/overseer/skills/overseer/scripts/lib/windows.sh
 . "$LIB/windows.sh"
 
 fail=0

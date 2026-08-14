@@ -2,7 +2,7 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $bad = 0
 $seen = 0
-foreach ($file in Get-ChildItem (Join-Path $root 'overseer/skills/overseer/scripts/win-*.ps1')) {
+foreach ($file in Get-ChildItem (Join-Path $root 'plugins/overseer/skills/overseer/scripts/win-*.ps1')) {
   $seen++
   $errors = $null
   [System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$null, [ref]$errors) | Out-Null

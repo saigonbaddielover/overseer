@@ -1,0 +1,20 @@
+{
+  "name": "sgbl",
+  "interface": {
+    "displayName": "SGBL"
+  },
+  "plugins": [
+    {
+      "name": "overseer",
+      "source": {
+        "source": "local",
+        "path": "./plugins/overseer"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

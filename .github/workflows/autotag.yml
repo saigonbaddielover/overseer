@@ -19,10 +19,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          pv=$(jq -r .version overseer/.claude-plugin/plugin.json)
+          pv=$(jq -r .version plugins/overseer/.claude-plugin/plugin.json)
+          cv=$(jq -r .version plugins/overseer/.codex-plugin/plugin.json)
           mv=$(jq -r '.plugins[] | select(.name=="overseer") | .version' .claude-plugin/marketplace.json)
-          if [ "$pv" != "$mv" ]; then
-            echo "::error::plugin.json ($pv) and marketplace.json ($mv) disagree — refusing to tag"
+          if [ "$pv" != "$cv" ] || [ "$pv" != "$mv" ]; then
+            echo "::error::claude plugin ($pv), codex plugin ($cv), and marketplace ($mv) disagree — refusing to tag"
             exit 1
           fi
           tag="overseer--v$pv"

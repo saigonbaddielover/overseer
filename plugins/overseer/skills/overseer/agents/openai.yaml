@@ -1,0 +1,7 @@
+interface:
+  display_name: "overseer"
+  short_description: "Drive and read live coding-agent sessions"
+  default_prompt: "Use $overseer to list the live Claude Code and Codex sessions I can reach."
+
+policy:
+  allow_implicit_invocation: true

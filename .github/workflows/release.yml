@@ -16,11 +16,12 @@ jobs:
       - name: the tag must match both manifests and the changelog
         run: |
           tv=${GITHUB_REF_NAME#overseer--v}
-          pv=$(jq -r .version overseer/.claude-plugin/plugin.json)
+          pv=$(jq -r .version plugins/overseer/.claude-plugin/plugin.json)
+          cv=$(jq -r .version plugins/overseer/.codex-plugin/plugin.json)
           mv=$(jq -r '.plugins[] | select(.name=="overseer") | .version' .claude-plugin/marketplace.json)
-          echo "tag=$tv plugin=$pv marketplace=$mv"
-          if [ "$tv" != "$pv" ] || [ "$tv" != "$mv" ]; then
-            echo "::error::tag $GITHUB_REF_NAME does not match plugin.json ($pv) / marketplace.json ($mv)"
+          echo "tag=$tv claude=$pv codex=$cv marketplace=$mv"
+          if [ "$tv" != "$pv" ] || [ "$tv" != "$cv" ] || [ "$tv" != "$mv" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match claude ($pv) / codex ($cv) / marketplace ($mv)"
             exit 1
           fi
           if ! grep -q "^## \[$tv\]" CHANGELOG.md; then

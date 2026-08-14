@@ -336,7 +336,7 @@ with a PowerShell-created scheduled task. Three gotchas, all hit and solved:
 
 **Shipped as `overseer winshow <host> [app]` in v0.7.0 (PR #34)** — the plugin's one Windows-facing
 command (overseer itself can't run on Windows). Launcher payload =
-`overseer/skills/overseer/scripts/win-show.ps1`; `cmd_winshow` pipes it over ssh stdin to a tiny
+`plugins/overseer/skills/overseer/scripts/win-show.ps1`; `cmd_winshow` pipes it over ssh stdin to a tiny
 EncodedCommand bootstrap that writes it to a temp file and runs `powershell -File` (dodging the cmd
 8191-char limit that killed the encode-whole-script approach), filters output to the one `OK`/`ERR` line,
 and uses `ServerAliveInterval` + 3× retry for the flaky relay. Two more gotchas: `MainWindowHandle` is
@@ -370,7 +370,7 @@ ends).
 
 Landed as six commands (pre-0.21.0 names) — `winbroker <host> [pwsh|claude|codex] [workdir]` `winpeek`
 `winkeys` `winsh` `winchat` `winstop` — plus three payloads under
-`overseer/skills/overseer/scripts/`:
+`plugins/overseer/skills/overseer/scripts/`:
 
 - `win-broker.ps1` — the Session-1 broker: ConIO `Add-Type` + named pipe + child sharing the console.
   `Resolve-StartDir` reads Windows Terminal `settings.json`'s default `startingDirectory`, so the
