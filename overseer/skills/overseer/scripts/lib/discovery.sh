@@ -323,6 +323,24 @@ _jsonl_of() {
   [ -n "$f" ] || f=$(ls "$CLAUDE_HOME"/projects/*/"$sid"*.jsonl 2>/dev/null | head -1)
   printf '%s' "$f"
 }
+_paneless_ctx() {
+  local f pid name sid cwd hit='' n=0
+  command -v jq >/dev/null 2>&1 || return 1
+  for f in "$CLAUDE_HOME"/sessions/*.json; do
+    [ -f "$f" ] || continue
+    pid=$(basename "$f" .json)
+    _p_comm "$pid" >/dev/null 2>&1 || continue
+    name=$(jq -r '.name // empty' "$f" 2>/dev/null) || continue
+    [ "$name" = "$1" ] || continue
+    sid=$(jq -r '.sessionId // empty' "$f" 2>/dev/null)
+    [ -n "$sid" ] || continue
+    cwd=$(jq -r '.cwd // empty' "$f" 2>/dev/null)
+    hit=$(_jsonl_of "$sid" "$cwd"); n=$((n + 1))
+  done
+  [ "$n" -le 1 ] || return 2
+  [ -n "$hit" ] || return 1
+  printf '%s\t%s\t%s' '-' claude "$hit"
+}
 # resolve target -> "pane_id<TAB>harness<TAB>transcript_path". uses the SAME pane resolution as
 # peek/keys/sh (the pane tmux would act on: a %N as-is, a session/window name -> its ACTIVE pane), so
 # every command targets one pane — no split-window divergence where chat drives one pane and peek

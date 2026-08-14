@@ -5,6 +5,29 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.51.0] - 2026-08-14
+
+### Added
+
+- **`read` works on a claude session that has no tmux pane** ([#97]). overseer's only input channel
+  is `tmux send-keys`, so a claude started outside tmux — a plain terminal, an IDE-integrated
+  terminal, the desktop app, an ssh login without `tmux new` — genuinely cannot be driven. But
+  reading is not writing: the session file already carries `name`, `sessionId` and `cwd`, and the
+  transcript is a file on disk, so nothing about `read` needed a pane. It was refused anyway, and the
+  error pointed at `SendMessage` — advice about writing. `read <name>` now falls back to resolving
+  the name straight to its transcript and labels the output `(no tmux pane — read off the transcript
+  on disk; overseer cannot drive this session)`, so the caller can tell a readable session from a
+  drivable one.
+
+  The fallback is used by **`read` only**. `send`/`chat`/`wait`/`unsend`/`interrupt` need a keyboard
+  and still fail without a pane, as they should. It refuses an ambiguous name rather than guessing,
+  and skips a dead session's stale file, matching `_pane_by_peer_name`.
+
+  Not included: `fleet read` fanning out over pane-less sessions. `fleet` is defined as "every agent
+  pane", and widening it also widens the `--hosts` fan-out — a separate decision.
+
+[#97]: https://github.com/saigonbaddielover/sgbl-overseer/issues/97
+
 ## [0.50.0] - 2026-08-14
 
 ### Fixed
