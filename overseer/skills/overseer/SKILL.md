@@ -34,7 +34,7 @@ from stdin.
 
 | Command | Effect | Safe? |
 |---|---|---|
-| `list [--all]` | **Every agent the harness knows**, led by **PEER** — the name Claude Code itself addresses a session by, `-` when it has none — and **REACH**: `keys+peer` (a drivable pane that also answers on the peer channel), `keys` (Codex/unnamed), or `peer` (a live claude with **no tmux pane**: overseer cannot drive it, `SendMessage` is the only way in). Then session, pane, pids, **HARNESS** (claude or codex) and cwd. Every command resolves that PEER name first, ahead of a `%N` or a session name, and targeting a `peer`-only row says so instead of failing with "no tmux pane". `--all` lists **every** tmux pane and its foreground command — use it to find shell panes to target. | read-only |
+| `list [--all]` | **Every agent the harness knows**, led by **PEER** — the name Claude Code itself addresses a session by, `-` only when it genuinely has none — and **REACH**: `keys+peer` (a drivable pane that also answers on the peer channel), `keys+name` (named, but publishing no `messagingSocketPath`, so only keystrokes reach it — the name still works as a target; older Claude Code builds), `keys` (Codex/unnamed), or `peer` (a live claude with **no tmux pane**: overseer cannot drive it, `SendMessage` is the only way in). Then session, pane, pids, **HARNESS** (claude or codex) and cwd. Every command resolves that PEER name first, ahead of a `%N` or a session name, and targeting a `peer`-only row says so instead of failing with "no tmux pane". `--all` lists **every** tmux pane and its foreground command — use it to find shell panes to target. | read-only |
 | `read <target>` | Print the last user prompt + the reply **paired with it**, from an agent's transcript (Claude `~/.claude/projects/.../<sid>.jsonl`, or Codex `~/.codex/sessions/.../rollout-*.jsonl`), auto-detected via the pane pid. A turn still in flight prints `(NO REPLY YET …)` — never the previous exchange — so `read` is safe to use for "what did it just say" without mistaking a stale reply for a current one. | read-only |
 | `peek [raw\|-e] <target> [lines]` | Dump the pane's current screen. Plain mode drops blank lines and a trailing number caps it to the last N lines. `raw` (also `-e`/`--raw`) keeps ANSI colors so the **active tab / selected row** — a highlight invisible in plain text — is readable; `raw` always prints the whole screen and ignores `[lines]`. Any pane. | read-only |
 | `chat [--yes] [--force-keys|--as-user] <target> <message\|-> [timeout]` | **Agent pane (Claude or Codex).** Send the message, **wait for the turn to finish**, then print the reply. The human round-trip. If the agent is **busy (mid-turn) or compacting**, the message is **queued** and `chat` waits for *its own* queued turn to complete — not the running one. The reply it prints is bound to *your* message (the first completed turn after your prompt, on both Claude and Codex), so it is never the running turn's reply, nor a later background/notification turn's if the agent is itself orchestrating child agents. If the agent stops at an interactive prompt (permission / plan / select menu) it returns that question + how to answer instead of hanging, and if the turn is **interrupted** it fails with "stopped without producing a reply" rather than waiting out the timeout — the message was still delivered, so `peek` before deciding to resend. | **SIDE EFFECT** |
@@ -379,11 +379,14 @@ WHOLE thing, do not stop at the first screen. The reliable loop:
    cannot tell an agent from its own user, and none of the harness's peer guardrails attach. Send it
    with the `SendMessage` tool addressed to that PEER name instead, which the receiver records as an
    authenticated peer message. `--force-keys` overrides the refusal for the cases that genuinely need
-   the keyboard, and `fleet send`/`fleet chat` take it too. Every keystroke delivery is prefixed so a
-   Codex/shell/remote target still knows who wrote to it: the prefix names the sender, states that it
-   is an agent rather than the user and not an approval to act, and says how to reply
+   the keyboard — including when *your* `SendMessage` cannot address that name at all, which the
+   refusal now says outright — and `fleet send`/`fleet chat` take it too. Every keystroke delivery is
+   prefixed so a Codex/shell/remote target still knows who wrote to it: the prefix names the sender,
+   states that it is an agent rather than the user and not an approval to act, and says how to reply
    (`SendMessage` when the target has a PEER name of its own, otherwise `overseer send <sender>`) —
-   it is a convention, not proof. A target driven through `on <host>` is never refused: the peer
+   it is a convention, not proof. If **you** have no PEER name, the prefix falls back to your tmux
+   session and pane id rather than being dropped, so a forced delivery is never anonymous; a human
+   running overseer from a plain shell pane is still not stamped. A target driven through `on <host>` is never refused: the peer
    channel is a unix socket under the caller's own user on the caller's own machine, so it cannot
    reach another host and the keyboard is the only path there.
 

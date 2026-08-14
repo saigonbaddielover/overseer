@@ -5,6 +5,47 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.50.0] - 2026-08-14
+
+### Fixed
+
+- **A forced keystroke delivery is no longer anonymous** ([#94]). The provenance prefix was attached
+  only when the *caller* had a PEER name of its own — resolved by the same rule that fails on any
+  Claude Code build that publishes no `messagingSocketPath`. So the delivery pushed onto the keyboard
+  by `--force-keys` was precisely the one that arrived with nothing saying it came from an agent,
+  which is the harm the peer refusal exists to prevent. An agent caller with no PEER name is now
+  stamped with its tmux session and pane id, and `overseer send <session>` as the reply address.
+  The caller is identified as an agent by **its own pane running a harness**, not by the absence of a
+  name, so a human running overseer from a plain shell pane is still not stamped — their message is
+  from the user and saying otherwise would be a lie of the same kind.
+- **`list` no longer reports a named session as unnamed** ([#94]). PEER detection requires a live
+  `messagingSocketPath`, which is what the *peer channel* needs — but an empty PEER column read as
+  "this session has no name" when it meant "this build does not publish that field". A named session
+  without the socket now shows its name with **`REACH=keys+name`**, and `doctor` reports how many
+  named sessions publish no socket.
+
+### Changed
+
+- **A peer name resolves as a target whether or not the peer channel is up** ([#94]). The pane is
+  drivable by keystrokes either way, so the name — presented as the primary target vocabulary — now
+  works on every build rather than only the newest. A named session with no pane *and* no socket is
+  reachable by nothing, and now says exactly that instead of pointing at `SendMessage`. Session files
+  are matched only while their process is alive, so a stale file can no longer resolve to a dead
+  pane; that liveness came free from the socket check before it was relaxed.
+- **The peer refusal names the caller-side limit.** It advised `SendMessage` without acknowledging
+  that the caller's `SendMessage` may only address agents its own session spawned — so for that
+  caller the advice pointed at a door it could not open, leaving `--force-keys` as the only path and
+  making it feel like an evasion. The refusal now says that outright: if `SendMessage` cannot reach
+  the name, `--force-keys` **is** the right call there, and the delivery carries the sender's
+  identity.
+
+Not addressed, deliberately: writing to `messagingSocketPath` from overseer itself. That is an
+undocumented, unversioned internal protocol — the report's own data (2 of 8 sessions publishing the
+field, split by build) is the evidence — and putting it in the critical path contradicts ADR-0001.
+Revisit if the protocol is ever published.
+
+[#94]: https://github.com/saigonbaddielover/sgbl-overseer/issues/94
+
 ## [0.49.0] - 2026-08-14
 
 ### Fixed

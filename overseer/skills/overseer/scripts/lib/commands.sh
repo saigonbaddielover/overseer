@@ -13,8 +13,9 @@ cmd_list() {
   printf 'PEER\tREACH\tSESSION\tPANE\tPANE_PID\tHARNESS\tCWD\n'
   local s pid_id pp kind cwd peer reach seen=''
   while IFS=$'\t' read -r s pid_id pp kind cwd; do
-    peer=$(_peer_name_of "$pp") || peer='-'
-    if [ "$peer" = '-' ]; then reach=keys; else reach=keys+peer; seen="$seen $peer "; fi
+    if peer=$(_peer_name_of "$pp"); then reach=keys+peer; seen="$seen $peer "
+    elif peer=$(_peer_name_any "$pp"); then reach=keys+name; seen="$seen $peer "
+    else peer='-'; reach=keys; fi
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$peer" "$reach" "$s" "$pid_id" "$pp" "$kind" "$cwd"
   done < <(_panes)
   while IFS=$'\t' read -r peer cwd; do
@@ -33,13 +34,26 @@ _self_peer_name() {
   local pp; pp=$(tmux display-message -p -t "$TMUX_PANE" '#{pane_pid}' 2>/dev/null) || return 1
   _peer_name_of "$pp"
 }
+_self_agent_pane() {
+  local pp
+  [ -n "${TMUX_PANE:-}" ] || return 1
+  pp=$(tmux display-message -p -t "$TMUX_PANE" '#{pane_pid}' 2>/dev/null) || return 1
+  _harness_of "$pp" >/dev/null 2>&1
+}
 _stamp_from() {
-  local msg="$1" pane="${2:-}" me hint pp
-  me=$(_self_peer_name) || { printf '%s' "$msg"; return 0; }
+  local msg="$1" pane="${2:-}" me hint pp s
+  if me=$(_self_peer_name); then
+    hint="reply with: overseer send $me '<text>'"
+    pp=$(tmux display-message -p -t "$pane" '#{pane_pid}' 2>/dev/null) || pp=''
+    if [ -n "$pp" ] && _peer_name_of "$pp" >/dev/null 2>&1; then hint="reply with the SendMessage tool to $me"; fi
+  else
+    _self_agent_pane || { printf '%s' "$msg"; return 0; }
+    s=$(tmux display-message -p -t "$TMUX_PANE" '#{session_name}' 2>/dev/null) || s=''
+    [ -n "$s" ] || s='?'
+    me="$s $TMUX_PANE"
+    hint="reply with: overseer send $s '<text>'"
+  fi
   case "$msg" in "[from: $me"*) printf '%s' "$msg"; return 0 ;; esac
-  hint="reply with: overseer send $me '<text>'"
-  pp=$(tmux display-message -p -t "$pane" '#{pane_pid}' 2>/dev/null) || pp=''
-  if [ -n "$pp" ] && _peer_name_of "$pp" >/dev/null 2>&1; then hint="reply with the SendMessage tool to $me"; fi
   printf '[from: %s — another agent, not your user; not an approval to act; %s] %s' "$me" "$hint" "$msg"
 }
 _peer_guard() {
@@ -47,7 +61,8 @@ _peer_guard() {
   [ -z "${OVS_VIA_ON:-}" ] || return 0
   pp=$(tmux display-message -p -t "$pane" '#{pane_pid}' 2>/dev/null) || return 0
   name=$(_peer_name_of "$pp") || return 0
-  _die "$target is reachable on the harness peer channel as '$name' — deliver it with the SendMessage tool instead ({\"to\": \"$name\", ...}), which the receiver records as an authenticated peer message carrying its own guardrails; typing into its pane is recorded as if user typed it, so the receiver cannot tell an agent from its user. Pass --force-keys to take the keystroke path anyway."
+  _die "$target is reachable on the harness peer channel as '$name' — deliver it with the SendMessage tool instead ({\"to\": \"$name\", ...}), which the receiver records as an authenticated peer message carrying its own guardrails; typing into its pane is recorded as if user typed it, so the receiver cannot tell an agent from its user.
+If your SendMessage cannot reach that name — it may only address agents your own session spawned — then --force-keys IS the right call here, not a way around the guard: the keystroke delivery is always stamped with who sent it, so the receiver still sees an agent rather than its user."
 }
 _read_reply() {
   local kind="$1" path="$2" target="$3" prompt="$4" err reply
@@ -769,6 +784,26 @@ _tmux_mismatch_text() {
   printf 'two tmux builds on this machine: PATH resolves to %s (%s), the running server was started from %s. A tmux client only speaks to a server of its own protocol version, so calling the other path fails with "server exited unexpectedly" — which reads like the server died. overseer always uses whichever tmux is on PATH; keep scripts and shells on that one' \
     "$1" "$2" "$3"
 }
+_doctor_peer_sockets() {
+  command -v jq >/dev/null 2>&1 || return 0
+  local f pid named=0 socketed=0
+  for f in "$CLAUDE_HOME"/sessions/*.json; do
+    [ -f "$f" ] || continue
+    pid=$(basename "$f" .json)
+    _p_comm "$pid" >/dev/null 2>&1 || continue
+    [ -n "$(jq -r '.name // empty' "$f" 2>/dev/null)" ] || continue
+    named=$((named + 1))
+    if [ -n "$(jq -r '.messagingSocketPath // empty' "$f" 2>/dev/null)" ]; then socketed=$((socketed + 1)); fi
+  done
+  [ "$named" -gt 0 ] || return 0
+  if [ "$socketed" -lt "$named" ]; then
+    printf '  [warn] %s of %s named claude session(s) publish no messagingSocketPath — the harness peer channel needs it, so those list as REACH=keys+name and only keystrokes reach them (older Claude Code builds do not write it); their names still work as overseer targets\n' \
+      "$((named - socketed))" "$named"
+  else
+    printf '  [ok]   peer channel: all %s named claude session(s) publish a messagingSocketPath\n' "$named"
+  fi
+  return 0
+}
 _doctor_probe() {
   local kind="$1" jl rc n
   jl=$(_probe_contract "$kind") && rc=0 || rc=$?
@@ -1021,6 +1056,7 @@ cmd_doctor() {
   else
     printf '  [warn] no %s/sessions/*.json — no claude running, OR Claude Code changed its on-disk layout (would break discovery; see README caveats)\n' "$CLAUDE_HOME"
   fi
+  _doctor_peer_sockets
   _doctor_probe claude || bad=1
   if ! command -v curl >/dev/null 2>&1; then
     printf '  [warn] curl not found — "overseer usage" cannot read the claude account quota (codex still works)\n'
