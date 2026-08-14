@@ -5,6 +5,39 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.49.0] - 2026-08-14
+
+### Fixed
+
+- **`read` no longer hands back a previous exchange dressed as the current one** ([#88]). It printed
+  "the last user prompt" and "the last assistant reply" as two independent queries, so a session
+  mid-turn came back with the *new* prompt paired to the *old* reply, and nothing in the output said
+  so — an operator verifying a broadcast could read three working agents as three dead ones. `read`
+  now uses the pairing the rest of overseer already relies on (`_h_reply_for` / `_h_running`, which
+  `send`/`chat`/`wait` have used all along; `read` was the only consumer ignoring them) and states
+  what it actually observed: `(NO REPLY YET …)` while the turn for that prompt is still running,
+  the paired reply once it completes.
+- **A stale API error is no longer replayed onto every later `read`** ([#88]). The error reader
+  returns the last *completed* assistant message if it was an API error — so once a turn ended on a
+  quota limit, every subsequent `read` reported `(NO REPLY — the turn ended in an API error)` with
+  that error, for days, even while a fresh turn was running normally. The error is now reported only
+  when it ended the turn belonging to the prompt being printed.
+- **An unreadable transcript says so instead of silently degrading.** When a transcript records
+  completed turns but the reader can extract no reply from it — the schema shift `doctor` already
+  detects — `read` now prints `(NO READABLE REPLY …)` and points at `doctor`, rather than falling
+  back to older content that looks current.
+- **`fleet send`/`fleet chat` with a `-` (stdin) message now reaches every pane** ([#84]). The
+  literal `-` was passed through to each per-pane `send`, and each one read stdin for itself: the
+  first pane drained the pipe and every later pane died on its own empty-message check. Because each
+  pane runs in its own subshell so one failure never aborts the batch, a partial broadcast looked
+  exactly like a complete one. The message is now resolved **once**, at fleet level, and the
+  resolved text is what fans out — including on the `--hosts`/`--tailscale` path, where the
+  unresolved `-` was also being handed to every remote host, and before the confirmation gate, which
+  previously previewed the literal `-` instead of the message being sent.
+
+[#84]: https://github.com/saigonbaddielover/sgbl-overseer/issues/84
+[#88]: https://github.com/saigonbaddielover/sgbl-overseer/issues/88
+
 ## [0.48.0] - 2026-08-12
 
 ### Changed

@@ -66,6 +66,40 @@ eq "codex last_reply mis-attributes to the later turn"       "CHILD-NOTIFY-REPLY
 eq "codex reply_for skips trailing null turns"               "codex reply text"   "$(_cx_reply_for_prompt "$FIX/codex-turn.jsonl" "codex prompt here")"
 eq "h_reply_for codex dispatch (keyed)"                      "PONG"               "$(_h_reply_for codex "$CXE" "ping")"
 
+RAR="$FIX/claude-running-after-reply.jsonl"
+SAE="$FIX/claude-stale-after-error.jsonl"
+URP="$FIX/claude-unreadable-reply.jsonl"
+_rr() { _read_reply "$1" "$2" "%9" "$(_h_last_prompt "$1" "$2")"; }
+eq "read: an answered turn still prints its reply" $'final reply\nsecond line' "$(_rr claude "$C")"
+eq "read: reply is paired, not the last one in the file"    "ANS1"      "$(_rr claude "$RTN")"
+eq "read: a turn in flight is named, not answered with the previous reply" \
+   "yes" "$(case "$(_rr claude "$RAR")" in '(NO REPLY YET'*) echo yes ;; *) echo no ;; esac)"
+eq "read: the previous reply is not printed while in flight" \
+   "no" "$(case "$(_rr claude "$RAR")" in *'first reply'*) echo yes ;; *) echo no ;; esac)"
+eq "read: an old API error is not replayed onto a turn in flight" \
+   "no" "$(case "$(_rr claude "$SAE")" in *'API Error'*) echo yes ;; *) echo no ;; esac)"
+eq "read: a current API error is still reported" \
+   "yes" "$(case "$(_rr claude "$FIX/claude-api-error.jsonl")" in '(NO REPLY — the turn ended in an API error)'*) echo yes ;; *) echo no ;; esac)"
+eq "read: a completed turn with no readable reply says so" \
+   "yes" "$(case "$(_rr claude "$URP")" in '(NO READABLE REPLY'*) echo yes ;; *) echo no ;; esac)"
+eq "read: codex in flight is named too" \
+   "yes" "$(case "$(_rr codex "$FIX/codex-busy.jsonl")" in '(NO REPLY YET'*) echo yes ;; *) echo no ;; esac)"
+
+fleet_stdin=$(
+  _panes() { printf 's1\t%%1\t111\tclaude\t/w\ns1\t%%2\t222\tclaude\t/w\ns1\t%%3\t333\tclaude\t/w\n'; }
+  _fleet_status() { printf '%s\tclaude\tidle\n' "$1"; }
+  _label_pane() { printf '%s' "$1"; }
+  cmd_send() { while [ "${1#--}" != "$1" ]; do shift; done; printf 'SENT %s [%s]\n' "$1" "$2"; }
+  _fleet_local send --yes - <<'MSG'
+line 1
+line 2
+MSG
+)
+eq "fleet send -: every pane receives it, not just the first" "3" \
+   "$(printf '%s\n' "$fleet_stdin" | grep -c '^SENT ')"
+eq "fleet send -: each pane receives the whole message" "3" \
+   "$(printf '%s\n' "$fleet_stdin" | grep -c 'line 1$')"
+
 Q2="$FIX/claude-two-queued.jsonl"
 eq "reply_for older prompt confirmed though a newer is last" "REPLY-A" "$(_reply_for_prompt "$Q2" "ASK-A")"
 eq "reply_for the pending newer prompt is empty"             ""        "$(_reply_for_prompt "$Q2" "ASK-B")"
