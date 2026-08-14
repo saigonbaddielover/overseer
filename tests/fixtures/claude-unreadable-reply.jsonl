@@ -1,0 +1,2 @@
+{"type":"user","sessionId":"unreadable","origin":{"kind":"human"},"message":{"content":"hi"}}
+{"type":"assistant","sessionId":"unreadable","message":{"stop_reason":"end_turn","content":[{"type":"output_v2","body":"hello"}]}}

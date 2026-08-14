@@ -1,0 +1,3 @@
+{"type":"user","sessionId":"stale-run","origin":{"kind":"human"},"message":{"content":"first prompt"}}
+{"type":"assistant","sessionId":"stale-run","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"first reply"}]}}
+{"type":"user","sessionId":"stale-run","origin":{"kind":"human"},"message":{"content":"second prompt"}}

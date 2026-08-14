@@ -49,17 +49,36 @@ _peer_guard() {
   name=$(_peer_name_of "$pp") || return 0
   _die "$target is reachable on the harness peer channel as '$name' — deliver it with the SendMessage tool instead ({\"to\": \"$name\", ...}), which the receiver records as an authenticated peer message carrying its own guardrails; typing into its pane is recorded as if user typed it, so the receiver cannot tell an agent from its user. Pass --force-keys to take the keystroke path anyway."
 }
+_read_reply() {
+  local kind="$1" path="$2" target="$3" prompt="$4" err reply
+  if _h_running "$kind" "$path"; then
+    printf '(NO REPLY YET — the turn for this prompt is still running, so no reply exists to print; wait for it: overseer wait %s)' "$target"
+    return 0
+  fi
+  err=$(_h_last_error "$kind" "$path")
+  if [ -n "$err" ]; then
+    printf '(NO REPLY — the turn ended in an API error) %s' "${err#*$'\t'}"
+    return 0
+  fi
+  reply=$(_h_reply_for "$kind" "$path" "$prompt")
+  [ -n "$reply" ] || reply=$(_h_last_reply "$kind" "$path")
+  if [ -n "$reply" ]; then
+    printf '%s' "$reply"
+  elif [ "$(_h_turn_count "$kind" "$path")" -gt 0 ]; then
+    printf '(NO READABLE REPLY — the transcript records completed turns but the reader extracted none, so its on-disk schema may have changed; check: overseer doctor)'
+  else
+    printf '(no completed turn yet)'
+  fi
+}
 cmd_read() {
   _need tmux; _need jq
   local target="${1:-}"; [ -n "$target" ] || _die "usage: overseer read <pane|session>"
   local ctx pane kind path; ctx=$(_target_ctx "$target") || _target_die "$target" "no agent pane (claude/codex) for target: $target (if the session is split, target the pane id %N — see: overseer list)"
   IFS=$'\t' read -r pane kind path <<< "$ctx"
   [ -n "$path" ] && [ -f "$path" ] || _die "no transcript yet for '$target' (a brand-new session with 0 turns has none)"
-  local err reply; err=$(_h_last_error "$kind" "$path")
-  if [ -n "$err" ]; then reply="(NO REPLY — the turn ended in an API error) ${err#*$'\t'}"
-  else reply=$(_h_last_reply "$kind" "$path"); fi
+  local prompt; prompt=$(_h_last_prompt "$kind" "$path")
   printf '# pane=%s harness=%s\n## last user prompt:\n%s\n\n## last assistant reply:\n%s\n' \
-    "$pane" "$kind" "$(_h_last_prompt "$kind" "$path")" "$reply"
+    "$pane" "$kind" "$prompt" "$(_read_reply "$kind" "$path" "$target" "$prompt")"
 }
 # dump the pane's current screen. default: the WHOLE visible screen (features like /status fill it;
 # truncating loses the top). `raw` keeps ANSI colors so an active tab / selected row — shown by a
@@ -443,6 +462,7 @@ _fleet_local() {
                   fl+=("$1"); shift ;;
         *) break ;; esac; done
       msg="${1:-}"; [ -n "$msg" ] || _die "usage: overseer fleet $action [--yes] [--force-keys|--as-user] <message>  (broadcasts to every agent pane)"
+      msg=$(_read_msg "$msg"); [ -n "$msg" ] || _die "usage: overseer fleet $action [--yes] [--force-keys|--as-user] <message>  (empty message on stdin)"
       local -a nt=(); { [ "$action" = send ] && [ -n "${2:-}" ]; } && nt=("$2")
       for p in "${targets[@]}"; do
         printf '===== %s =====\n' "$(_label_pane "$p")"
@@ -529,6 +549,8 @@ cmd_fleet() {
       esac; done
       msg="${1:-}"
       [ -n "$msg" ] || _die "usage: overseer fleet --hosts $action [--yes] [--force-keys|--as-user] [--dry-run] <message>  (broadcasts to every idle agent in the fleet)"
+      msg=$(_read_msg "$msg")
+      [ -n "$msg" ] || _die "usage: overseer fleet --hosts $action [--yes] [--force-keys|--as-user] [--dry-run] <message>  (empty message on stdin)"
       local -a fka=(); [ "$fk" = 1 ] && fka=(--force-keys); [ "$au" = 1 ] && fka=(--as-user)
       set -- "$action" --yes ${fka[@]+"${fka[@]}"} "$msg" ;;
   esac
