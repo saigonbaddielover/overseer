@@ -102,8 +102,10 @@ Open a new Codex thread after updating.
 
 ## Commands
 
-All work goes through the bundled `skills/overseer/scripts/overseer` script. The installed skill
-resolves its absolute location for Claude Code or Codex; from a source checkout, run
+All work goes through the bundled `skills/overseer/scripts/overseer` script, called by its absolute
+path: Claude Code has the plugin root in the environment, so the agent runs
+`bash "${CLAUDE_PLUGIN_ROOT}/skills/overseer/scripts/overseer" <command> [args]`; Codex has no such
+variable and uses the installed skill's own directory instead. From a source checkout, run
 `plugins/overseer/skills/overseer/scripts/overseer <command> [args]`.
 `<target>` is a tmux pane id (`%3`) or a session/window name (its active pane).
 
@@ -462,7 +464,8 @@ enforced — the plugin never hard-blocks on version.
 Run the preflight first:
 
 ```
-overseer doctor        # checkout: plugins/overseer/skills/overseer/scripts/overseer doctor
+overseer doctor        # or: bash "$CLAUDE_PLUGIN_ROOT/skills/overseer/scripts/overseer" doctor
+                       # checkout: plugins/overseer/skills/overseer/scripts/overseer doctor
 ```
 
 - **"no agent pane (claude/codex) for target"** → the pane isn't running Claude Code or Codex, or you

@@ -40,9 +40,13 @@ jobs:
         if: github.event_name == 'pull_request'
         run: |
           pv=$(jq -r .version plugins/overseer/.claude-plugin/plugin.json)
-          base=$(git show "origin/${{ github.base_ref }}:plugins/overseer/.claude-plugin/plugin.json" 2>/dev/null | jq -r .version) \
-            || base=$(git show "origin/${{ github.base_ref }}:overseer/.claude-plugin/plugin.json" 2>/dev/null | jq -r .version) \
-            || base=""
+          base=""
+          for p in plugins/overseer/.claude-plugin/plugin.json overseer/.claude-plugin/plugin.json; do
+            if raw=$(git show "origin/${{ github.base_ref }}:$p" 2>/dev/null); then
+              base=$(printf '%s' "$raw" | jq -r '.version // empty')
+              if [ -n "$base" ]; then break; fi
+            fi
+          done
           if [ -z "$base" ]; then
             echo "no baseline plugin.json on origin/${{ github.base_ref }} — skipping"
           elif [ "$pv" = "$base" ]; then

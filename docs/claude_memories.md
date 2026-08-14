@@ -95,7 +95,7 @@ up later; leave them as the standing answer and say nothing about macOS otherwis
 through the interactive `/plugin` menu in the TUI: type `/plugin`, pick the plugin, choose Update.
 `/reload-plugins` afterward (or a restart) loads the new code — it only re-reads on-disk code, it does
 not git-pull the marketplace clone, so it never bumps the version. Verify with
-`jq -r .version ~/.claude/plugins/marketplaces/sgbl/overseer/.claude-plugin/plugin.json`.
+`jq -r .version ~/.claude/plugins/marketplaces/sgbl/plugins/overseer/.claude-plugin/plugin.json`.
 
 **`autoUpdate: true` does not help the session you are in.** The `sgbl` marketplace entry in
 `~/.claude/settings.json` has `"autoUpdate": true` and is configured correctly — but a *running* session

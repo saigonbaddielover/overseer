@@ -933,6 +933,28 @@ eq "README states the Linux controller / Windows target support model" "yes" "$(
 eq "SKILL frontmatter has the Codex-required name" "yes" "$(sed -n '/^---$/,/^---$/p' "$SKILL" | grep -qF 'name: overseer' && echo yes || echo no)"
 eq "SKILL frontmatter names the Windows broker commands" "yes" "$(sed -n '/^---$/,/^---$/p' "$SKILL" | grep -qE 'win HOST.*(start|chat)' && echo yes || echo no)"
 eq "SKILL resolves one portable runner" "yes" "$(_has "$SKILL" 'bash "$OVERSEER_BIN" <command> [args]')"
+eq "SKILL assigns OVERSEER_BIN from the Claude plugin root" "yes" \
+   "$(_has "$SKILL" 'OVERSEER_BIN="${CLAUDE_PLUGIN_ROOT}/skills/overseer/scripts/overseer"')"
+eq "SKILL tells Codex where to get the same absolute path" "yes" "$(_hasre "$SKILL" 'skill roots table')"
+
+_md_blocks_using_bin_without_assigning() {
+  awk '
+    /^```/ { inb = !inb; if (inb) { buf = "" } else if (buf ~ /bash "\$OVERSEER_BIN"/ && buf !~ /OVERSEER_BIN=/) n++; next }
+    inb { buf = buf $0 "\n" }
+    END { print n + 0 }
+  ' "$1"
+}
+eq "every SKILL code block calling OVERSEER_BIN assigns it first" "0" "$(_md_blocks_using_bin_without_assigning "$SKILL")"
+
+_md_dead_relative_links() {
+  local base link n=0
+  base=$(dirname "$1")
+  for link in $(grep -o '(\.\./[^)]*)' "$1" | tr -d '()'); do
+    [ -e "$base/$link" ] || n=$((n + 1))
+  done
+  printf '%s' "$n"
+}
+eq "every relative link in SKILL resolves on disk" "0" "$(_md_dead_relative_links "$SKILL")"
 eq "SKILL scope section covers both target kinds" "yes" "$(_hasre "$SKILL" '^## Scope: what runs where')"
 for v in OVERSEER_REMOTE_DIR OVERSEER_REMOTE_BIN OVERSEER_NO_AUTODEPLOY OVERSEER_SSH OVERSEER_SSH_OPTS OVERSEER_SCP OVERSEER_WIN_CLAUDE OVERSEER_WIN_CODEX OVERSEER_TIMEOUT OVERSEER_POLL_INTERVAL; do
   eq "README documents $v" "yes" "$(_has "$README" "$v")"
