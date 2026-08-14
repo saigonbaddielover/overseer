@@ -149,7 +149,7 @@ while :; do
   esac
   sleep 2
 done
-"$OVS_SELF" send --yes "$OVS_BACK" "[overseer] wake-up from the worker you dispatched to: $OVS_TARGET ($OVS_KIND).
+TMUX_PANE= "$OVS_SELF" send --yes --force-keys "$OVS_BACK" "[overseer] wake-up from the worker you dispatched to: $OVS_TARGET ($OVS_KIND).
 
 --- overseer wait $OVS_TARGET reported:
 $out

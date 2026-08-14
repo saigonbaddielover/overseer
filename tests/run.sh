@@ -703,7 +703,24 @@ eq "notify: the watcher waits on the worker"          "yes" "$(case "$NS" in *'w
 eq "notify: the watcher waits inside the given budget" "yes" "$(case "$NS" in *'$(date +%s) + OVS_TIMEOUT'*) echo yes ;; *) echo no ;; esac)"
 eq "notify: a confirmed turn skips the startup grace"  "yes" "$(case "$NS" in *'"$OVS_STARTED" = 1'*) echo yes ;; *) echo no ;; esac)"
 eq "notify: an unconfirmed turn does not trust a stale idle" "yes" "$(case "$NS" in *'-ge "$grace"'*) echo yes ;; *) echo no ;; esac)"
-eq "notify: the watcher wakes the dispatcher's pane"  "yes" "$(case "$NS" in *'send --yes "$OVS_BACK"'*) echo yes ;; *) echo no ;; esac)"
+eq "notify: the watcher wakes the dispatcher's pane"  "yes" "$(case "$NS" in *'send --yes --force-keys "$OVS_BACK"'*) echo yes ;; *) echo no ;; esac)"
+eq "notify: the wake-up clears the inherited TMUX_PANE" "yes" "$(case "$NS" in *'TMUX_PANE= "$OVS_SELF" send '*) echo yes ;; *) echo no ;; esac)"
+
+_notify_wake_outcome() {
+  local forcekeys="$1" inherited="$2"
+  (
+    export TMUX_PANE="$inherited"
+    _die() { printf 'REFUSED'; exit 0; }
+    tmux() { printf '4242'; }
+    _peer_name_of() { printf 'dispatcher'; }
+    _no_self %back "send to"
+    [ "$forcekeys" = 1 ] || _peer_guard %back %back
+    printf 'DELIVERED'
+  )
+}
+eq "notify: a wake-up that keeps TMUX_PANE is refused as its own pane" "REFUSED" "$(_notify_wake_outcome 1 %back)"
+eq "notify: a wake-up without --force-keys is refused by the peer guard" "REFUSED" "$(_notify_wake_outcome 0 '')"
+eq "notify: the wake-up as the watcher now sends it is delivered" "DELIVERED" "$(_notify_wake_outcome 1 '')"
 eq "notify: the wake-up quotes what wait reported"    "yes" "$(case "$NS" in *'overseer wait $OVS_TARGET reported'*) echo yes ;; *) echo no ;; esac)"
 eq "notify: the wake-up orders a whole-fleet survey"  "yes" "$(case "$NS" in *'overseer fleet status'*) echo yes ;; *) echo no ;; esac)"
 eq "notify: the quoted output is capped"              "yes" "$(case "$NS" in *'head -c 1200'*) echo yes ;; *) echo no ;; esac)"

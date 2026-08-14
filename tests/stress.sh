@@ -110,7 +110,7 @@ _die() { printf 'overseer: %s\n' "$1" >&2; exit 1; }
 GLOG="$TMP/notify-calls.log"
 cat >"$TMP/fake-overseer" <<EOF
 #!/usr/bin/env bash
-printf '%s\n' "\$1 \$2 \$3" >>"$GLOG"
+printf '%s\n' "\$1 \$2 \$3 \$4 tmux_pane=[\${TMUX_PANE-unset}]" >>"$GLOG"
 [ "\$1" = wait ] && { sleep 2; printf 'idle\n'; }
 exit 0
 EOF
@@ -119,8 +119,9 @@ chmod +x "$TMP/fake-overseer"
 gt0=$(date +%s)
 while [ "$(( $(date +%s) - gt0 ))" -lt 20 ]; do grep -q '^send' "$GLOG" 2>/dev/null && break; sleep 0.3; done
 gel=$(( $(date +%s) - gt0 ))
-grep -q '^wait %worker 42$' "$GLOG" 2>/dev/null && ok "watcher waits on the worker with the given timeout" || no "watcher did not wait on the worker ($(cat "$GLOG" 2>/dev/null | tr '\n' '|'))"
-grep -q '^send --yes %admin$' "$GLOG" 2>/dev/null && ok "watcher woke the dispatcher's pane after the wait (${gel}s, outlived its parent)" || no "watcher never woke the dispatcher ($(cat "$GLOG" 2>/dev/null | tr '\n' '|'))"
+grep -q '^wait %worker 42 ' "$GLOG" 2>/dev/null && ok "watcher waits on the worker with the given timeout" || no "watcher did not wait on the worker ($(cat "$GLOG" 2>/dev/null | tr '\n' '|'))"
+grep -q '^send --yes --force-keys %admin ' "$GLOG" 2>/dev/null && ok "watcher woke the dispatcher's pane after the wait (${gel}s, outlived its parent)" || no "watcher never woke the dispatcher ($(cat "$GLOG" 2>/dev/null | tr '\n' '|'))"
+grep -q '^send .* tmux_pane=\[\]$' "$GLOG" 2>/dev/null && ok "watcher clears the inherited TMUX_PANE before waking" || no "watcher kept TMUX_PANE, so _no_self would refuse the wake-up ($(cat "$GLOG" 2>/dev/null | tr '\n' '|'))"
 [ "$(head -1 "$GLOG" 2>/dev/null | cut -d' ' -f1)" = wait ] && ok "watcher waits before it wakes (ordering)" || no "watcher wake/wait ordering wrong"
 
 GLOG2="$TMP/notify-calls2.log"; GSTATE="$TMP/notify-firstwait"

@@ -1,6 +1,6 @@
 {
   "name": "overseer",
-  "version": "0.52.0",
+  "version": "0.53.0",
   "description": "Drive and read other Claude Code, Codex, and shell sessions in Linux tmux panes or remote Windows consoles.",
   "author": {
     "name": "saigonbaddielover",
