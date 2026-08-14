@@ -383,6 +383,25 @@ eq "peer name: named, no pane and no socket is reachable by nothing" \
 eq "peer name: a dead session's stale file is not a candidate" "1" \
    "$( ( CLAUDE_HOME="$PH"; _peer_live() { [ -n "$1" ]; }; _p_comm() { return 1; }; _pane_by_peer_name solo ) >/dev/null 2>&1; echo $?)"
 rm -rf "$PH"
+
+GH="${TMPDIR:-/tmp}/ov-ghost-$$"; mkdir -p "$GH/sessions" "$GH/projects/-x"
+cp "$FIX/claude-turn.jsonl" "$GH/projects/-x/gsid.jsonl"
+printf '{"name":"ghost","sessionId":"gsid","cwd":"/x"}\n'     >"$GH/sessions/1.json"
+printf '{"name":"twinghost","sessionId":"gsid","cwd":"/x"}\n' >"$GH/sessions/2.json"
+printf '{"name":"twinghost","sessionId":"gsid","cwd":"/x"}\n' >"$GH/sessions/3.json"
+printf '{"name":"nosid","cwd":"/x"}\n'                        >"$GH/sessions/4.json"
+_ghost() { ( CLAUDE_HOME="$GH"; _p_comm() { :; }; _paneless_ctx "$1" ); }
+eq "paneless: a named session with no pane still resolves to its transcript" \
+   "$GH/projects/-x/gsid.jsonl" "$(_ghost ghost | cut -f3)"
+eq "paneless: it reports no pane and the claude harness" "- claude" \
+   "$(_ghost ghost | cut -f1,2 | tr '\t' ' ')"
+eq "paneless: a duplicated name refuses instead of guessing" "2" \
+   "$(_ghost twinghost >/dev/null 2>&1; echo $?)"
+eq "paneless: a session with no sessionId is no candidate" "1" \
+   "$(_ghost nosid >/dev/null 2>&1; echo $?)"
+eq "paneless: a dead session's stale file is not a candidate" "1" \
+   "$( ( CLAUDE_HOME="$GH"; _p_comm() { return 1; }; _paneless_ctx ghost ) >/dev/null 2>&1; echo $?)"
+rm -rf "$GH"
 eq "resolve: an ambiguous peer name never falls through to tmux" "1" \
    "$( ( _pane_by_peer_name() { return 2; }; tmux() { printf '%%99'; }; _resolve_pane twin ) >/dev/null 2>&1; echo $?)"
 eq "target error: an ambiguous name says so, not 'no tmux pane'" "yes" \

@@ -86,14 +86,18 @@ _read_reply() {
   fi
 }
 cmd_read() {
-  _need tmux; _need jq
-  local target="${1:-}"; [ -n "$target" ] || _die "usage: overseer read <pane|session>"
-  local ctx pane kind path; ctx=$(_target_ctx "$target") || _target_die "$target" "no agent pane (claude/codex) for target: $target (if the session is split, target the pane id %N — see: overseer list)"
+  _need jq
+  local target="${1:-}"; [ -n "$target" ] || _die "usage: overseer read <pane|session|name>"
+  local ctx pane kind path note=''
+  if ! ctx=$(_target_ctx "$target"); then
+    ctx=$(_paneless_ctx "$target") || { _need tmux; _target_die "$target" "no agent pane (claude/codex) for target: $target (if the session is split, target the pane id %N — see: overseer list)"; }
+    note=' (no tmux pane — read off the transcript on disk; overseer cannot drive this session)'
+  fi
   IFS=$'\t' read -r pane kind path <<< "$ctx"
   [ -n "$path" ] && [ -f "$path" ] || _die "no transcript yet for '$target' (a brand-new session with 0 turns has none)"
   local prompt; prompt=$(_h_last_prompt "$kind" "$path")
-  printf '# pane=%s harness=%s\n## last user prompt:\n%s\n\n## last assistant reply:\n%s\n' \
-    "$pane" "$kind" "$prompt" "$(_read_reply "$kind" "$path" "$target" "$prompt")"
+  printf '# pane=%s harness=%s%s\n## last user prompt:\n%s\n\n## last assistant reply:\n%s\n' \
+    "$pane" "$kind" "$note" "$prompt" "$(_read_reply "$kind" "$path" "$target" "$prompt")"
 }
 # dump the pane's current screen. default: the WHOLE visible screen (features like /status fill it;
 # truncating loses the top). `raw` keeps ANSI colors so an active tab / selected row — shown by a
