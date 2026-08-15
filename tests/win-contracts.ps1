@@ -130,29 +130,50 @@ Check 'src: no payload assigns the read-only $pid automatic'    $false (($broker
 Check 'src: client accepts a controller-selected broker root'   $true  (($clientSrc -match '\[string\]\$Root') -and ($clientSrc -match 'if \(\$Root\)'))
 Check 'src: local launcher bypasses the scheduled-task bridge'  $true  (($launchSrc -match 'if \(\$Local\)') -and ($launchSrc -match 'Start-Process') -and ($launchSrc -match 'WindowStyle Normal'))
 Check 'src: native transcript tail shares a live rollout'       $true  ($nativeSrc -match 'FileShare\]::ReadWrite -bor \[IO\.FileShare\]::Delete')
+Check 'src: native transcript cache gates on mtime and size'     $true  (($nativeSrc -match 'Get-CachedTranscriptState') -and ($nativeSrc -match '-Size \$stat\.Size -Mtime \$stat\.Mtime'))
 Check 'src: native delivery refuses codex shell-command mode'   $true  ($nativeSrc -match "Codex runs a message starting with '!'")
 Check 'src: native shell cancels a stale input line first'      $true  (($nativeSrc -match "Name = 'C-c'") -and ($nativeSrc -match 'Invoke-BrokerClient -Op sh'))
 
-if ($onWindows) {
-  $native = Join-Path $scripts 'overseer.ps1'
-  . $native
-  $fixtures = Join-Path $here 'fixtures'
-  $cl = Read-TranscriptState -Kind claude -Path (Join-Path $fixtures 'claude-turn.jsonl') -Want 'second prompt'
-  Check 'native parser: claude turn count'       2 $cl.TurnCount
-  Check 'native parser: claude last prompt'      'second prompt' $cl.LastPrompt
-  Check 'native parser: claude paired reply'     "final reply`nsecond line" $cl.ReplyFor
-  Check 'native parser: completed claude idle'   $false $cl.Busy
-  $clBusy = Read-TranscriptState -Kind claude -Path (Join-Path $fixtures 'claude-busy.jsonl')
-  Check 'native parser: busy claude detected'    $true $clBusy.Busy
-  $cx = Read-TranscriptState -Kind codex -Path (Join-Path $fixtures 'codex-turn.jsonl') -Want 'codex prompt here'
-  Check 'native parser: codex turn count'        1 $cx.TurnCount
-  Check 'native parser: codex last prompt'       'codex prompt here' $cx.LastPrompt
-  Check 'native parser: codex paired reply'      'codex reply text' $cx.ReplyFor
-  $cxBusy = Read-TranscriptState -Kind codex -Path (Join-Path $fixtures 'codex-busy.jsonl')
-  Check 'native parser: busy codex detected'     $true $cxBusy.Busy
-} else {
-  Skip 'native controller transcript parser' 'native controller runs on Windows; CI covers it on windows-latest'
+Import-Fn 'overseer.ps1' 'Get-TextBlocks'
+Import-Fn 'overseer.ps1' 'Read-TranscriptState'
+Import-Fn 'overseer.ps1' 'Get-CachedTranscriptState'
+Import-Fn 'overseer.ps1' 'Test-Awaiting'
+$fixtures = Join-Path $here 'fixtures'
+$clPath = Join-Path $fixtures 'claude-turn.jsonl'
+$cl = Read-TranscriptState -Kind claude -Path $clPath -Want 'second prompt'
+Check 'native parser: claude turn count'       2 $cl.TurnCount
+Check 'native parser: claude last prompt'      'second prompt' $cl.LastPrompt
+Check 'native parser: claude paired reply'     "final reply`nsecond line" $cl.ReplyFor
+Check 'native parser: completed claude idle'   $false $cl.Busy
+$clBusy = Read-TranscriptState -Kind claude -Path (Join-Path $fixtures 'claude-busy.jsonl')
+Check 'native parser: busy claude detected'    $true $clBusy.Busy
+$cx = Read-TranscriptState -Kind codex -Path (Join-Path $fixtures 'codex-turn.jsonl') -Want 'codex prompt here'
+Check 'native parser: codex turn count'        1 $cx.TurnCount
+Check 'native parser: codex last prompt'       'codex prompt here' $cx.LastPrompt
+Check 'native parser: codex paired reply'      'codex reply text' $cx.ReplyFor
+$cxBusy = Read-TranscriptState -Kind codex -Path (Join-Path $fixtures 'codex-busy.jsonl')
+Check 'native parser: busy codex detected'     $true $cxBusy.Busy
+
+$script:TranscriptCache = @{}
+$cached1 = Get-CachedTranscriptState -Kind claude -Path $clPath -Size 100 -Mtime 200 -Want 'second prompt'
+$cached2 = Get-CachedTranscriptState -Kind claude -Path $clPath -Size 100 -Mtime 200 -Want 'second prompt'
+$cached3 = Get-CachedTranscriptState -Kind claude -Path $clPath -Size 101 -Mtime 200 -Want 'second prompt'
+Check 'native cache: unchanged signature reuses parsed state' $true ([object]::ReferenceEquals($cached1, $cached2))
+Check 'native cache: changed signature reparses state'        $false ([object]::ReferenceEquals($cached2, $cached3))
+
+foreach ($case in @(
+  @('awaiting parity: claude unicode cursor', $true, 'awaiting-claude.txt'),
+  @('awaiting parity: codex unicode cursor', $true, 'awaiting-codex.txt'),
+  @('awaiting parity: Windows ASCII cursor', $true, 'awaiting-windows-console.txt'),
+  @('awaiting parity: no menu', $false, 'awaiting-none.txt'),
+  @('awaiting parity: markdown quote', $false, 'awaiting-none-markdown-quote.txt'),
+  @('awaiting parity: plain numbered list', $false, 'awaiting-none-numbered-list.txt')
+)) {
+  Check $case[0] $case[1] (Test-Awaiting (Get-Content -Raw (Join-Path $fixtures $case[2])))
 }
+Check 'awaiting parity: numbering must be consecutive' $false (Test-Awaiting "2. b`n❯ 1. a")
+Check 'awaiting parity: menu may start above one'       $true  (Test-Awaiting "Proceed?`n> 4. Yes`n  5. No")
+Check 'awaiting parity: all marked is not a menu'       $false (Test-Awaiting "> 1. yes`n> 2. no")
 
 if ($fail -eq 0) { Write-Host 'PASS: windows payload contracts'; exit 0 }
 Write-Host "FAIL: $fail contract check(s) failed"; exit 1

@@ -29,10 +29,10 @@ $OverseerBin = '<skill-directory>\scripts\overseer.ps1'
 & $OverseerBin <command> [args]
 ```
 
-Windows commands target a worker name created by `start`: `start <name> [pwsh|claude|codex]
-[workdir]`, then `list`, `peek <name>`, `read <name>`, `send <name> --yes <message>`, `chat <name>
---yes <message> [timeout]`, `wait`, `keys`, `interrupt`, `slash`, `menu`, `quit`, or `stop`. Only workers
-created by this entry point are drivable; do not claim it can attach to an arbitrary existing console.
+The native command set is `start`, `list`, `peek`, `keys`, `sh`, `read`, `send`, `chat`, `wait`,
+`interrupt`, `slash`, `menu`, `quit`, `stop`, and `doctor`. Commands target a worker name created by
+`start <name> [pwsh|claude|codex] [workdir]`. Only workers created by this entry point are drivable; do
+not claim it can attach to an arbitrary existing console.
 Sending is still a side effect and requires the user's explicit request.
 
 On **Linux**, use the Bash entry point. In Claude Code the plugin root is already in the environment:

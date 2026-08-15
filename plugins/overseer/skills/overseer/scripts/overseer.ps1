@@ -13,6 +13,7 @@ $script:Launcher = Join-Path $script:ScriptDir 'win-launch.ps1'
 $script:BrokerPayload = Join-Path $script:ScriptDir 'win-broker.ps1'
 $script:PollMs = if ($env:OVERSEER_POLL_INTERVAL) { [Math]::Max(1, [int]([double]$env:OVERSEER_POLL_INTERVAL * 1000)) } else { 250 }
 $script:DefaultTimeout = if ($env:OVERSEER_TIMEOUT) { [int]$env:OVERSEER_TIMEOUT } else { 600 }
+$script:TranscriptCache = @{}
 
 function Fail([string]$Message) { throw "overseer: $Message" }
 
@@ -176,6 +177,24 @@ function Read-TranscriptState {
   }
 }
 
+function Get-CachedTranscriptState {
+  param(
+    [Parameter(Mandatory = $true)][string]$Kind,
+    [Parameter(Mandatory = $true)][string]$Path,
+    [Parameter(Mandatory = $true)][long]$Size,
+    [Parameter(Mandatory = $true)][long]$Mtime,
+    [string]$Want = ''
+  )
+  if ($null -eq $script:TranscriptCache) { $script:TranscriptCache = @{} }
+  $key = "$Kind`n$Path`n$Want"
+  $signature = "${Mtime}:${Size}"
+  $cached = $script:TranscriptCache[$key]
+  if ($cached -and $cached.Signature -eq $signature) { return $cached.State }
+  $state = Read-TranscriptState -Kind $Kind -Path $Path -Want $Want
+  $script:TranscriptCache[$key] = [PSCustomObject]@{ Signature = $signature; State = $state }
+  return $state
+}
+
 function Get-AgentContext([string]$Target, [string]$Want = '', [switch]$AllowNoTranscript) {
   $stat = Get-BrokerStat $Target
   if ($stat.Kind -notin @('claude', 'codex')) { Fail "'$Target' hosts '$($stat.Kind)', not an agent; start it with claude or codex" }
@@ -185,15 +204,37 @@ function Get-AgentContext([string]$Target, [string]$Want = '', [switch]$AllowNoT
     Fail "no transcript yet for '$Target' (a new session with zero turns has none)"
   }
   if ($stat.Transcript -notmatch '^[A-Za-z]:\\[A-Za-z0-9\\/:._ -]+\.jsonl$') { Fail "broker reported an unsafe transcript path: $($stat.Transcript)" }
-  $state = Read-TranscriptState -Kind $stat.Kind -Path $stat.Transcript -Want $Want
+  $state = Get-CachedTranscriptState -Kind $stat.Kind -Path $stat.Transcript -Size $stat.Size -Mtime $stat.Mtime -Want $Want
   [PSCustomObject]@{ Stat = $stat; State = $state }
 }
 
 function Test-Awaiting([string]$Snapshot) {
-  $options = @($Snapshot -split "`r?`n" | Where-Object { $_ -match '^\s*([❯›])?\s*[0-9]+[.)]\s+' })
-  if ($options.Count -lt 2) { return $false }
-  $marked = @($options | Where-Object { $_ -match '^\s*[❯›]' }).Count
-  return $marked -ge 1 -and $marked -lt $options.Count
+  $lines = @($Snapshot -split "`r?`n")
+  $options = New-Object 'object[]' $lines.Count
+  for ($i = 0; $i -lt $lines.Count; $i++) {
+    if ($lines[$i].TrimStart() -match '^(?<mark>[❯›>])?\s*(?<number>[0-9]+)[.)]\s+') {
+      $options[$i] = [PSCustomObject]@{
+        Number = [int]$Matches.number
+        Marked = [bool]$Matches.mark
+      }
+    }
+  }
+  for ($i = 0; $i -lt $options.Count; $i++) {
+    if ($null -eq $options[$i]) { continue }
+    $j = $i
+    $count = 0
+    $marked = 0
+    $previous = 0
+    while ($j -lt $options.Count -and $null -ne $options[$j] -and ($j -eq $i -or $options[$j].Number -eq ($previous + 1))) {
+      $previous = $options[$j].Number
+      $count++
+      if ($options[$j].Marked) { $marked++ }
+      $j++
+    }
+    if ($count -ge 2 -and $marked -ge 1 -and $marked -lt $count) { return $true }
+    $i = $j - 1
+  }
+  return $false
 }
 
 function Write-Awaiting([string]$Target, [string]$Snapshot) {
@@ -385,7 +426,7 @@ function Invoke-Chat([string[]]$Values) {
   if ($result.Outcome -eq 'awaiting') { Write-Awaiting $p.Target $result.Snapshot; return }
   if ($result.Outcome -eq 'timeout') { Fail "timeout after $($p.Timeout)s; do not resend—use wait, then read" }
   if ($result.Outcome -eq 'stopped') { Fail 'the turn stopped without producing a reply; peek before deciding whether to resend' }
-  $state = Read-TranscriptState -Kind $placed.Kind -Path $result.Context.Stat.Transcript -Want $p.Prompt
+  $state = $result.Context.State
   if ($state.LastError) { Fail $state.LastError }
   $reply = if ($state.ReplyFor) { $state.ReplyFor } else { $state.LastReply }
   "## reply:`n$reply"

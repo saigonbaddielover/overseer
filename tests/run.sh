@@ -931,6 +931,7 @@ eq "win_field alive False" "False"                           "$(_win_field "$INF
 eq "win_sig no transcript" ":"                               "$(_win_sig "$INFO")"
 
 ENTRY="$HERE/../plugins/overseer/skills/overseer/scripts/overseer"
+NATIVE="$HERE/../plugins/overseer/skills/overseer/scripts/overseer.ps1"
 README="$HERE/../README.md"
 SKILL="$HERE/../plugins/overseer/skills/overseer/SKILL.md"
 
@@ -951,6 +952,33 @@ for surface in help README SKILL; do
   extra=$(comm -13 <(printf '%s\n' "$DISPATCH") <(printf '%s\n' "$documented") | tr '\n' ' ')
   eq "$surface documents every dispatched command" "" "$(printf '%s' "$missing" | sed 's/ *$//')"
   eq "$surface documents no command that does not exist" "" "$(printf '%s' "$extra" | sed 's/ *$//')"
+done
+
+_native_dispatch_cmds() {
+  sed -nE "/^function Invoke-Main/,/^}/ s/^[[:space:]]+'([a-z]+)'[[:space:]]+\{[[:space:]]+Invoke-.*/\1/p" "$NATIVE" | sort -u
+}
+_native_help_cmds() {
+  sed -nE '/^function Write-Help/,/^function Invoke-Main/ s/^  ([a-z]+)[[:space:]]+.*/\1/p' "$NATIVE" | sort -u
+}
+_native_readme_cmds() {
+  sed -n '/^### Native Windows controller/,/^### Linux controller/p' "$README" | grep -oE '`[a-z]+`' | tr -d '`' | sort -u
+}
+_native_skill_cmds() {
+  sed -n '/^All work goes through one bundled OS-specific entry point/,/^On \*\*Linux\*\*/p' "$SKILL" | grep -oE '`[a-z]+`' | tr -d '`' | sort -u
+}
+
+NATIVE_DISPATCH=$(_native_dispatch_cmds)
+eq "native dispatch surface is non-empty" "yes" "$([ -n "$NATIVE_DISPATCH" ] && echo yes || echo no)"
+for surface in help README SKILL; do
+  case "$surface" in
+    help)   documented=$(_native_help_cmds) ;;
+    README) documented=$(_native_readme_cmds) ;;
+    SKILL)  documented=$(_native_skill_cmds) ;;
+  esac
+  missing=$(comm -23 <(printf '%s\n' "$NATIVE_DISPATCH") <(printf '%s\n' "$documented") | tr '\n' ' ')
+  extra=$(comm -13 <(printf '%s\n' "$NATIVE_DISPATCH") <(printf '%s\n' "$documented") | tr '\n' ' ')
+  eq "native $surface documents every dispatched command" "" "$(printf '%s' "$missing" | sed 's/ *$//')"
+  eq "native $surface documents no command that does not exist" "" "$(printf '%s' "$extra" | sed 's/ *$//')"
 done
 
 WINLIB="$HERE/../plugins/overseer/skills/overseer/scripts/lib/windows.sh"

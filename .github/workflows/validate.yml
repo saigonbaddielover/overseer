@@ -82,6 +82,9 @@ jobs:
       - name: windows flow tests
         run: bash tests/win-flow.sh
 
+      - name: Windows payload contracts on PowerShell/Linux
+        run: bash tests/win-payloads.sh
+
   powershell:
     runs-on: windows-latest
     steps:
