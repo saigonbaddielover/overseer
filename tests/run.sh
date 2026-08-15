@@ -157,7 +157,6 @@ eq "codex aborted!=busy"   ""                          "$(_cx_is_busy "$FIX/code
 
 eq "awaiting claude"       "0"                         "$(_awaiting_text "$(cat "$FIX/awaiting-claude.txt")" >/dev/null 2>&1; echo $?)"
 eq "awaiting claude with descriptions" "0"              "$(_awaiting_text "$(cat "$FIX/awaiting-claude-described.txt")" >/dev/null 2>&1; echo $?)"
-eq "awaiting claude with descriptions on windows" "0"   "$(_awaiting_text "$(cat "$FIX/awaiting-claude-described.txt")" '❯›>' >/dev/null 2>&1; echo $?)"
 eq "awaiting codex"        "0"                         "$(_awaiting_text "$(cat "$FIX/awaiting-codex.txt")" >/dev/null 2>&1; echo $?)"
 eq "awaiting none"         "1"                         "$(_awaiting_text "$(cat "$FIX/awaiting-none.txt")" >/dev/null 2>&1; echo $?)"
 eq "compacting claude"     "0"  "$(_compacting_text "$(cat "$FIX/compacting-claude.txt")" >/dev/null 2>&1; echo $?)"
@@ -242,12 +241,9 @@ eq "codex steer absent on queue" "1" "$(_cx_steering_text "$(cat "$FIX/codex-que
 eq "realtext: empty box reads empty"                  ""                  "$(_realtext_of "$(cat "$FIX/claude-box-empty.txt")")"
 eq "realtext: a dim ghost split by an SGR reads empty" ""                 "$(_realtext_of "$(cat "$FIX/claude-ghost-queued.txt")")"
 eq "realtext: real typed text survives"               "half typed draft"  "$(_realtext_of "$(cat "$FIX/claude-box-draft.txt")")"
-eq "awaiting win console"  "0"                         "$(_awaiting_text "$(cat "$FIX/awaiting-windows-console.txt")" '❯›>' >/dev/null 2>&1; echo $?)"
 eq "linux ignores ascii >"        "1"                  "$(_awaiting_text "$(cat "$FIX/awaiting-windows-console.txt")" >/dev/null 2>&1; echo $?)"
 eq "markdown quote not awaiting"  "1"                  "$(_awaiting_text "$(cat "$FIX/awaiting-none-markdown-quote.txt")" >/dev/null 2>&1; echo $?)"
-eq "markdown quote not awaiting on windows" "1"        "$(_awaiting_text "$(cat "$FIX/awaiting-none-markdown-quote.txt")" '❯›>' >/dev/null 2>&1; echo $?)"
 eq "plain numbered list not awaiting" "1"              "$(_awaiting_text "$(cat "$FIX/awaiting-none-numbered-list.txt")" >/dev/null 2>&1; echo $?)"
-eq "plain numbered list not awaiting on windows" "1"   "$(_awaiting_text "$(cat "$FIX/awaiting-none-numbered-list.txt")" '❯›>' >/dev/null 2>&1; echo $?)"
 eq "all options marked is not a menu" "1"              "$(_awaiting_text "$(printf '> 1. yes\n> 2. no\n')" '❯›>' >/dev/null 2>&1; echo $?)"
 
 _aw() { _awaiting_text "$1" "${2:-❯›}" >/dev/null 2>&1 && echo awaiting || echo no; }
@@ -258,6 +254,14 @@ eq "a real menu under a numbered reply is found" "awaiting" \
    "$(_aw "$(printf '1. alpha\n2. beta\nProceed?\n❯ 1. Yes\n  2. No\n')")"
 eq "a menu not starting at 1 still counts"    "awaiting" "$(_aw "$(printf 'Proceed?\n❯ 4. Yes\n  5. No\n')")"
 eq "a lone marked option is not a menu"       "no"       "$(_aw "$(printf 'Proceed?\n❯ 1. Yes\n')")"
+
+awn=0
+for awf in "$FIX"/awaiting-*.txt; do
+  awn=$((awn + 1))
+  case "${awf##*/}" in awaiting-none*) awwant=no ;; *) awwant=awaiting ;; esac
+  eq "awaiting parity: ${awf##*/}" "$awwant" "$(_aw "$(cat "$awf")" '❯›>')"
+done
+eq "awaiting parity: every fixture is asserted" "yes" "$([ "$awn" -ge 7 ] && echo yes || echo no)"
 
 WRAPBOX=$(cat "$FIX/win-snap-wrapped-box.txt")
 LONGP='Write a 1200-word essay on the history of the semicolon in English prose. Answer entirely from your own knowledge in one message: do NOT use any tool, do NOT read or write any file, do NOT run any command.'

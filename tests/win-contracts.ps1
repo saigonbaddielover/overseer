@@ -169,17 +169,12 @@ $cached3 = Get-CachedTranscriptState -Kind claude -Path $clPath -Size 101 -Mtime
 Check 'native cache: unchanged signature reuses parsed state' $true ([object]::ReferenceEquals($cached1, $cached2))
 Check 'native cache: changed signature reparses state'        $false ([object]::ReferenceEquals($cached2, $cached3))
 
-foreach ($case in @(
-  @('awaiting parity: claude unicode cursor', $true, 'awaiting-claude.txt'),
-  @('awaiting parity: Claude options with descriptions', $true, 'awaiting-claude-described.txt'),
-  @('awaiting parity: codex unicode cursor', $true, 'awaiting-codex.txt'),
-  @('awaiting parity: Windows ASCII cursor', $true, 'awaiting-windows-console.txt'),
-  @('awaiting parity: no menu', $false, 'awaiting-none.txt'),
-  @('awaiting parity: markdown quote', $false, 'awaiting-none-markdown-quote.txt'),
-  @('awaiting parity: plain numbered list', $false, 'awaiting-none-numbered-list.txt')
-)) {
-  Check $case[0] $case[1] (Test-Awaiting (Get-Content -Raw (Join-Path $fixtures $case[2])))
+$awaitingFixtures = @(Get-ChildItem -Path $fixtures -Filter 'awaiting-*.txt' | Sort-Object Name)
+foreach ($fx in $awaitingFixtures) {
+  $want = -not ($fx.Name -like 'awaiting-none*')
+  Check "awaiting parity: $($fx.Name)" $want (Test-Awaiting (Get-Content -Raw $fx.FullName))
 }
+Check 'awaiting parity: every fixture is asserted' $true ($awaitingFixtures.Count -ge 7)
 Check 'awaiting parity: numbering must be consecutive' $false (Test-Awaiting "2. b`n❯ 1. a")
 Check 'awaiting parity: menu may start above one'       $true  (Test-Awaiting "Proceed?`n> 4. Yes`n  5. No")
 Check 'awaiting parity: all marked is not a menu'       $false (Test-Awaiting "> 1. yes`n> 2. no")
