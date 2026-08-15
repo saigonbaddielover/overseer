@@ -5,6 +5,20 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.54.0] - 2026-08-14
+
+### Added
+
+- **Codex turn detection now uses the bundled hooks, not just polling.** Codex runs plugin hooks
+  (`Stop`, `UserPromptSubmit`) exactly as Claude Code does — its `HookEventName` enum carries both —
+  and the shared `hooks/turn-done.sh` already writes the same per-session markers, keyed by the Codex
+  session id. `_h_sid` resolves that id from the rollout filename, so `_wait_started` accepts the
+  `turn-started` marker for Codex and closes the `send`→`wait` start race there too, and `_wait_reply`
+  takes the `turn-done` signal for either harness. Both are additive: a Codex session whose hooks are
+  untrusted or absent still resolves through the existing rollout poll, unchanged.
+  Codex has no `Notification` event, so the `awaiting` marker stays Claude-only and the screen remains
+  the arbiter for an interactive prompt on both.
+
 ## [0.53.0] - 2026-08-14
 
 ### Fixed

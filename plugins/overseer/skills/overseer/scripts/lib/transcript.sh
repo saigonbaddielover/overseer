@@ -73,6 +73,14 @@ _sid_from_jsonl() { jq -r 'select(.sessionId != null and .sessionId != "") | .se
 # complete, reply = the last complete's message, prompt = the last real user input_text (skip the
 # injected AGENTS.md `#...` / `<environment_context>` wrappers, like the claude reader does).
 _cx_turn_count() { local n; n=$(jq -c 'select(.type=="event_msg" and .payload.type=="task_complete")' "$1" 2>/dev/null | wc -l); echo "${n:-0}"; }
+_cx_sid_from_rollout() {
+  local b="${1##*/}"
+  b="${b%.jsonl}"; b="${b##*T[0-9][0-9]-[0-9][0-9]-[0-9][0-9]-}"
+  case "$b" in
+    [0-9a-f]*-[0-9a-f]*-[0-9a-f]*-[0-9a-f]*-[0-9a-f]*) printf '%s' "$b" ;;
+  esac
+  return 0
+}
 _cx_is_busy() {
   local counts st ct ab
   counts=$(jq -rn 'reduce inputs as $e ([0,0,0];
@@ -133,6 +141,7 @@ _h_reply_for()  { case "$1" in claude) _reply_for_prompt "$2" "$3" ;; codex) _cx
 _h_answered()   { case "$1" in claude) _answered "$2" "$3" ;; codex) _cx_answered "$2" "$3" ;; esac; }
 _h_last_prompt(){ case "$1" in claude) _last_prompt "$2" ;; codex) _cx_last_prompt "$2" ;; esac; }
 _h_last_error() { case "$1" in claude) _last_api_error "$2" ;; codex) _cx_last_api_error "$2" ;; esac; }
+_h_sid()        { case "$1" in claude) _sid_from_jsonl "$2" ;; codex) _cx_sid_from_rollout "$2" ;; esac; return 0; }
 _h_queued()     { case "$1" in claude) _cl_queued "$2" ;; codex) _cx_queued "$3" ;; esac; }
 _h_unqueued()   { case "$1" in claude) [ "$(_cl_queue_op "$2")" = popAll ] ;; codex) [ -z "$(_cx_queued "$3")" ] ;; esac; }
 _h_steering()   { case "$1" in claude) return 1 ;; codex) _cx_steering "$3" ;; esac; }
@@ -171,7 +180,7 @@ _wait_reply() {
   local kind="$1" path="$2" base="$3" timeout="${4:-600}" sid="${5:-}" since="${6:-0}" pane="${7:-}" bbytes="${8:-}" i=0 woke=0 cur quiet=0 st lastst='' seen=0
   local deadline=$((SECONDS + timeout)) sig last=''
   while [ "$SECONDS" -lt "$deadline" ]; do
-    [ "$kind" = claude ] && [ "$woke" = 0 ] && [ -n "$sid" ] && _signal_since "$sid" "$since" && woke=1
+    [ "$woke" = 0 ] && [ -n "$sid" ] && _signal_since "$sid" "$since" && woke=1
     # the signal only says "look now"; correctness is the transcript actually showing the new turn,
     # so a reply is never read before it is flushed. codex has no signal -> check every tick.
     sig=$(_file_sig "$path")
@@ -262,7 +271,7 @@ _wait_started() {
   local deadline=$((SECONDS + timeout)) sig last=''
   while [ "$SECONDS" -lt "$deadline" ]; do
     [ -n "$pane" ] && _queued "$pane" && { printf '%s' "$path"; return 5; }
-    [ "$kind" = claude ] && [ -n "$sid" ] && _marker_since turn-started "$sid" "$since" && { printf '%s' "$path"; return 0; }
+    [ -n "$sid" ] && _marker_since turn-started "$sid" "$since" && { printf '%s' "$path"; return 0; }
     if [ -z "$path" ] || [ ! -f "$path" ]; then
       ctx=$(_target_ctx "$target" 2>/dev/null) && IFS=$'\t' read -r _ _ path <<< "$ctx" || true
     fi

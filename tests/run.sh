@@ -118,6 +118,35 @@ eq "codex last_prompt"     "codex prompt here"         "$(_cx_last_prompt "$X")"
 
 eq "codex busy"            "busy"                      "$(_cx_is_busy "$FIX/codex-busy.jsonl" && echo busy)"
 
+RO="/x/.codex/sessions/2026/08/14/rollout-2026-08-14T17-45-13-01a00160-c3b4-70d3-bc54-09f25f4086f0.jsonl"
+eq "codex sid off the rollout name" "01a00160-c3b4-70d3-bc54-09f25f4086f0" "$(_cx_sid_from_rollout "$RO")"
+eq "codex sid: a name with no timestamp yields nothing" "" "$(_cx_sid_from_rollout /x/rollout-nope.jsonl)"
+eq "codex sid: an empty path yields nothing"            "" "$(_cx_sid_from_rollout "")"
+eq "h_sid claude dispatch" "test-sid-123"                          "$(_h_sid claude "$C")"
+eq "h_sid codex dispatch"  "01a00160-c3b4-70d3-bc54-09f25f4086f0"  "$(_h_sid codex "$RO")"
+eq "h_sid never fails under set -e" "rc=0" "$(_h_sid codex ''; echo "rc=$?")"
+
+_marker_probe() {
+  local sub="$1" sid="$2" age="$3"
+  local d="$CLAUDE_HOME/$sub"
+  mkdir -p "$d"; : >"$d/$sid"
+  [ "$age" = old ] && touch -d '@1' "$d/$sid"
+  _marker_since "$sub" "$sid" "$(date +%s)" && echo hit || echo miss
+}
+eq "marker: a fresh turn-done counts for a codex sid" "hit" \
+   "$(_marker_probe turn-done 01a00160-c3b4-70d3-bc54-09f25f4086f0 fresh)"
+eq "marker: a stale turn-started does not"            "miss" \
+   "$(_marker_probe turn-started 01a00160-c3b4-70d3-bc54-09f25f4086f0 old)"
+eq "marker: no file at all does not"                  "miss" \
+   "$(_marker_since turn-done never-existed-sid "$(date +%s)" && echo hit || echo miss)"
+rm -rf "$CLAUDE_HOME/turn-done" "$CLAUDE_HOME/turn-started"
+
+_kind_guard_count() { grep -c "$1" "$LIB/transcript.sh"; }
+eq "wait_reply takes the hook signal for any harness" "0" \
+   "$(_kind_guard_count '\[ "\$kind" = claude \] && \[ "\$woke" = 0 \]')"
+eq "wait_started takes turn-started for any harness"  "0" \
+   "$(_kind_guard_count '\[ "\$kind" = claude \] && \[ -n "\$sid" \] && _marker_since turn-started')"
+
 eq "turn_advanced count: base below current" "adv" "$(_turn_advanced claude "$C" 0 "" && echo adv)"
 eq "turn_advanced count: base at current"    ""    "$(_turn_advanced claude "$C" 2 "" && echo adv)"
 eq "turn_advanced bytes: offset 0"           "adv" "$(_turn_advanced claude "$C" 0 0 && echo adv)"

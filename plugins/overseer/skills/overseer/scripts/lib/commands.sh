@@ -187,7 +187,7 @@ cmd_send() {
   local base; base=$(_h_turn_count "$kind" "$path" 2>/dev/null); base="${base:-0}"
   local bbytes; bbytes=$(_fsize "$path")
   local prequeue=0; { { [ -n "$path" ] && [ -f "$path" ] && _h_running "$kind" "$path"; } || _compacting "$pane"; } && prequeue=1
-  local sid=''; [ "$kind" = claude ] && [ -n "$path" ] && [ -f "$path" ] && sid=$(_sid_from_jsonl "$path")
+  local sid=''; [ -n "$path" ] && [ -f "$path" ] && sid=$(_h_sid "$kind" "$path")
 
   _deliver "$pane" "$kind" "$msg" || _die "$(_undelivered "$pane" "$target")"
   if [ "$confirm" = 1 ]; then
@@ -326,7 +326,7 @@ cmd_chat() {
 
   local sid='' base=0 since bbytes='' prequeue=0
   if [ "$has_tx" = 1 ]; then
-    [ "$kind" = claude ] && sid=$(_sid_from_jsonl "$path"); base=$(_h_turn_count "$kind" "$path"); bbytes=$(_fsize "$path")
+    sid=$(_h_sid "$kind" "$path"); base=$(_h_turn_count "$kind" "$path"); bbytes=$(_fsize "$path")
   fi
   { { [ "$has_tx" = 1 ] && _h_running "$kind" "$path"; } || _compacting "$pane"; } && prequeue=1
   _deliver "$pane" "$kind" "$msg" || _die "$(_undelivered "$pane" "$target")"
@@ -341,7 +341,7 @@ cmd_chat() {
   if [ "$has_tx" = 0 ]; then
     path=$(_wait_started "$target" "$kind" "$path" 0 30 "$pane") || true
     { [ -z "$path" ] || [ ! -f "$path" ]; } && _die "sent, but no transcript appeared for '$target' within 30s — check it with: overseer peek $target ; then resume: overseer wait $target"
-    [ "$kind" = claude ] && sid=$(_sid_from_jsonl "$path")
+    sid=$(_h_sid "$kind" "$path")
     printf '# sent to %s (waiting for reply...)\n' "$pane" >&2
     _wait_reply "$kind" "$path" "$base" "$timeout" "$sid" "$since" "$pane" "$bbytes" || rc=$?
   elif [ "$prequeue" = 1 ]; then
