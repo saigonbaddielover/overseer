@@ -5,6 +5,22 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.57.0] - 2026-08-15
+
+### Added
+
+- Native Windows `usage [--json] [name]` reads the controller machine's Claude OAuth quota directly,
+  reports local Claude/Codex worker context, and gives `send`/`chat`/`wait` the same cached threshold
+  warning behavior as the Bash controller.
+
+### Fixed
+
+- Native Windows `wait` now recognizes current Claude approval/question menus whose numbered choices
+  contain indented description lines, without treating ordinary numbered prose as a blocking prompt.
+- Native SSH option parsing now preserves literal dollar signs and quoted arguments without invoking
+  PowerShell expansion.
+- SSH archive streaming no longer shadows PowerShell's automatic `$input` variable.
+
 ## [0.56.0] - 2026-08-15
 
 ### Added

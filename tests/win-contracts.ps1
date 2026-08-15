@@ -137,6 +137,10 @@ Check 'src: native on marks remote commands as cross-machine'   $true  ($nativeS
 Check 'src: native SSH keeps the ten-second connect timeout'     $true  ($nativeSrc -match "'-o', 'ConnectTimeout=10'")
 Check 'src: native SSH omits unsupported connection sharing'    $false ($nativeSrc -match 'ControlMaster|ControlPath|ControlPersist')
 Check 'src: native deploy selects one tar executable'            $true  ($nativeSrc -match 'Get-Command tar[^\r\n]+Select-Object -First 1')
+Check 'src: native SSH does not shadow automatic $input'         $false ($nativeSrc -match '(?im)^\s*\$input\s*=')
+Check 'src: native quota does not shadow automatic $HOME'        $false ($nativeSrc -match '(?im)^\s*\$home\s*=')
+Check 'src: native send/chat/wait call the quota warning seam'    4 (($nativeSrc | Select-String -Pattern 'Write-QuotaWarningForContext \$' -AllMatches).Matches.Count)
+Check 'src: native usage calls only the fixed Anthropic endpoint' $true (($nativeSrc -match "-Uri 'https://api\.anthropic\.com/api/oauth/usage'") -and -not ($nativeSrc -match 'OVERSEER_.*BASE_URL'))
 
 Import-Fn 'overseer.ps1' 'Get-TextBlocks'
 Import-Fn 'overseer.ps1' 'Read-TranscriptState'
@@ -167,6 +171,7 @@ Check 'native cache: changed signature reparses state'        $false ([object]::
 
 foreach ($case in @(
   @('awaiting parity: claude unicode cursor', $true, 'awaiting-claude.txt'),
+  @('awaiting parity: Claude options with descriptions', $true, 'awaiting-claude-described.txt'),
   @('awaiting parity: codex unicode cursor', $true, 'awaiting-codex.txt'),
   @('awaiting parity: Windows ASCII cursor', $true, 'awaiting-windows-console.txt'),
   @('awaiting parity: no menu', $false, 'awaiting-none.txt'),
@@ -179,6 +184,15 @@ Check 'awaiting parity: numbering must be consecutive' $false (Test-Awaiting "2.
 Check 'awaiting parity: menu may start above one'       $true  (Test-Awaiting "Proceed?`n> 4. Yes`n  5. No")
 Check 'awaiting parity: all marked is not a menu'       $false (Test-Awaiting "> 1. yes`n> 2. no")
 
+Import-Fn 'overseer.ps1' 'Invoke-Wait'
+$script:WaitContextCalls = 0
+function global:Get-Snapshot { param([string]$Target) Get-Content -Raw (Join-Path $fixtures 'awaiting-claude-described.txt') }
+function global:Get-AgentContext { param([string]$Target) $script:WaitContextCalls++; throw 'a startup prompt has no transcript yet' }
+function global:Write-Awaiting { param([string]$Target, [string]$Snapshot) "awaiting:$Target" }
+$startupWait = Invoke-Wait @('new-worker', '5')
+Check 'native wait: a startup question returns before transcript lookup' 'awaiting:new-worker' $startupWait
+Check 'native wait: a startup question needs no transcript' 0 $script:WaitContextCalls
+
 Import-Fn 'overseer.ps1' 'ConvertTo-PosixSingleQuoted'
 Check 'native quote: empty argument'       "''"          (ConvertTo-PosixSingleQuoted '')
 Check 'native quote: preserves spaces'     "'two words'" (ConvertTo-PosixSingleQuoted 'two words')
@@ -188,6 +202,12 @@ Check 'native quote: preserves newlines'   "'line one`nline two'" (ConvertTo-Pos
 Import-Fn 'overseer.ps1' 'ConvertFrom-SshOptionString'
 Import-Fn 'overseer.ps1' 'Fail'
 Import-Fn 'overseer.ps1' 'Resolve-SshInvocation'
+Check 'native SSH opts: quoted spaces stay in one argument' '-o|ProxyCommand=ssh -W %h:%p host|-i|C:\Users\me key' ((ConvertFrom-SshOptionString '-o "ProxyCommand=ssh -W %h:%p host" -i ''C:\Users\me key''') -join '|')
+Check 'native SSH opts: dollar sigils remain literal' '-o|SetEnv=TOKEN=$VALUE' ((ConvertFrom-SshOptionString '-o "SetEnv=TOKEN=$VALUE"') -join '|')
+Check 'native SSH opts: empty quoted arguments survive' 'ssh||tail' ((ConvertFrom-SshOptionString 'ssh "" tail') -join '|')
+$badSshQuote = $false
+try { $null = ConvertFrom-SshOptionString '-o "unfinished' } catch { $badSshQuote = $_.Exception.Message -match 'unclosed' }
+Check 'native SSH opts: an unclosed quote fails loudly' $true $badSshQuote
 $oldSsh = $env:OVERSEER_SSH
 try {
   $env:OVERSEER_SSH = 'ssh'
@@ -201,6 +221,43 @@ try {
 } finally {
   if ($null -eq $oldSsh) { Remove-Item Env:OVERSEER_SSH -ErrorAction SilentlyContinue } else { $env:OVERSEER_SSH = $oldSsh }
 }
+
+Import-Fn 'overseer.ps1' 'ConvertTo-QuotaEpoch'
+Import-Fn 'overseer.ps1' 'Get-QuotaDuration'
+Import-Fn 'overseer.ps1' 'ConvertTo-ClaudeQuotaRows'
+Import-Fn 'overseer.ps1' 'Get-CodexWindowLabel'
+Import-Fn 'overseer.ps1' 'ConvertTo-CodexQuotaRows'
+Import-Fn 'overseer.ps1' 'Get-QuotaBreach'
+Import-Fn 'overseer.ps1' 'Get-TranscriptUsage'
+Import-Fn 'overseer.ps1' 'Write-NativeQuotaRows'
+Import-Fn 'overseer.ps1' 'Write-ClaudeUsage'
+$script:QuotaWarn = 90
+$quotaPayload = Get-Content -Raw (Join-Path $fixtures 'claude-quota-api.json')
+$quotaRows = @(ConvertTo-ClaudeQuotaRows $quotaPayload)
+Check 'native usage: every Claude quota window is retained' 3 $quotaRows.Count
+Check 'native usage: scoped Claude labels match Bash' 'weekly_scoped:Fable' $quotaRows[2].Window
+Check 'native usage: server-critical breaches below no threshold' 'weekly_all' (Get-QuotaBreach $quotaRows).Window
+$normalRows = @([PSCustomObject]@{ Window = 'session'; UsedPercent = 89; ResetsAt = 0; Severity = 'normal' })
+Check 'native usage: normal quota below threshold is quiet' $null (Get-QuotaBreach $normalRows)
+$normalRows[0].UsedPercent = 90
+Check 'native usage: normal quota at threshold warns' 'session' (Get-QuotaBreach $normalRows).Window
+Import-Fn 'overseer.ps1' 'Get-QuotaWarningText'
+function global:Get-ClaudeQuotaCached { [PSCustomObject]@{ Available = $true; Code = 0; Payload = ($quotaPayload | ConvertFrom-Json -Depth 100) } }
+$quotaContext = [PSCustomObject]@{ Stat = [PSCustomObject]@{ Kind = 'claude'; Transcript = '' } }
+Check 'native usage: local Claude commands get the warning text' $true ([bool]((Get-QuotaWarningText $quotaContext) -match 'WARNING claude quota weekly_all at 99%'))
+$codexQuotaContext = [PSCustomObject]@{ Stat = [PSCustomObject]@{ Kind = 'codex'; Transcript = (Join-Path $fixtures 'codex-quota.jsonl') } }
+Check 'native usage: local Codex commands get the warning text' $true ([bool]((Get-QuotaWarningText $codexQuotaContext) -match 'WARNING codex quota 7d at 100%'))
+function global:Get-ClaudeQuotaLive { [PSCustomObject]@{ Available = $true; Code = 0; Payload = ($quotaPayload | ConvertFrom-Json -Depth 100) } }
+function global:Set-ClaudeQuotaCache { param($Payload) }
+$plainUsage = @(Write-ClaudeUsage '' '' $false) -join "`n"
+Check 'native usage: successful live output prints critical rows' $true ([bool]($plainUsage -match 'weekly_all\s+99%.*CRITICAL'))
+$jsonUsage = Write-ClaudeUsage '' '' $true | ConvertFrom-Json -Depth 100
+Check 'native usage: JSON retains all windows' 3 $jsonUsage.quota.Count
+$claudeUsage = Get-TranscriptUsage claude (Join-Path $fixtures 'claude-turn.jsonl')
+Check 'native usage: Claude context is read locally' '0' $claudeUsage.Context
+$codexUsage = Get-TranscriptUsage codex (Join-Path $fixtures 'codex-quota.jsonl')
+Check 'native usage: Codex rolling window matches Bash' '7d' $codexUsage.Rows[0].Window
+Check 'native usage: Codex context matches Bash' '168569/258400' $codexUsage.Context
 
 Import-Fn 'overseer.ps1' 'Invoke-On'
 $oldRemoteBin = $env:OVERSEER_REMOTE_BIN

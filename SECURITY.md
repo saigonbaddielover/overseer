@@ -29,11 +29,13 @@ The rules it holds to:
 
 - The token is sent **only to `api.anthropic.com`**, the service that issued it. There is no
   third-party endpoint, no telemetry, and no configurable base URL that could redirect it.
-- It is handed to `curl` on **stdin** (`curl --config -`), never on the command line, so it is not
-  visible in `ps` to other users on the machine.
+- The Bash controller hands it to `curl` on **stdin** (`curl --config -`); the native Windows controller
+  passes it directly to `Invoke-RestMethod` as an in-process authorization header. It is never put on a
+  command line, so process listings cannot expose it.
 - It is **never written anywhere** — not logged, not echoed, not cached. Only the *response* (usage
   percentages and reset times, no credential) is cached, under
-  `${XDG_CACHE_HOME:-~/.cache}/overseer/quota-claude.json` at mode 600, to bound how often
+  `${XDG_CACHE_HOME:-~/.cache}/overseer/quota-claude.json` at mode 600 on Linux, or
+  `%LOCALAPPDATA%\overseer\cache\quota-claude.json` under the current Windows user, to bound how often
   `chat`/`send`/`wait` refetch for their warning line.
 - overseer **never writes to the credentials file** and cannot refresh an expired token; it reports
   the expiry and stops.
@@ -41,6 +43,8 @@ The rules it holds to:
   their quota warning — the file is never opened.
 
 `usage` writes no Claude configuration. It installs nothing, and never modifies `settings.json`.
+Native Windows performs this read locally rather than through `on`, because the remote Linux host has a
+different credential and therefore a different account quota.
 
 ## Windows targets (the `win <host> <verb>` commands)
 

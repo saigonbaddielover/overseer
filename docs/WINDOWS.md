@@ -9,6 +9,7 @@ workers directly from PowerShell 7:
 & <skill-dir>\scripts\overseer.ps1 doctor --live
 & <skill-dir>\scripts\overseer.ps1 start worker codex C:\work\project
 & <skill-dir>\scripts\overseer.ps1 chat worker --yes 'Review the current change' 600
+& <skill-dir>\scripts\overseer.ps1 usage worker
 ```
 
 This local path needs no SSH, WSL, tmux, scheduled task, or Administrator access. Its descriptors are
@@ -16,6 +17,12 @@ user-private under `%LOCALAPPDATA%\overseer`; the broker is launched directly be
 already in the interactive desktop session. It reuses the same named-pipe protocol and Win32 console
 I/O described below. It can drive only workers it created—attaching to an arbitrary existing Windows
 Terminal tab is not supported.
+
+`usage [--json] [name]` deliberately runs on the Windows controller rather than through `on`: Claude
+quota belongs to the OAuth credential in that machine's `%USERPROFILE%\.claude\.credentials.json`
+(or `$env:CLAUDE_HOME`). It performs one read-only request to the fixed Anthropic usage endpoint;
+`send`, `chat`, and `wait` cache only the response under `%LOCALAPPDATA%\overseer\cache` long enough to
+emit threshold warnings. A named Claude or Codex worker also contributes its local transcript context.
 
 ### Driving Linux hosts from Windows
 

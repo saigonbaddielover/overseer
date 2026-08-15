@@ -13,11 +13,34 @@ $script:Launcher = Join-Path $script:ScriptDir 'win-launch.ps1'
 $script:BrokerPayload = Join-Path $script:ScriptDir 'win-broker.ps1'
 $script:PollMs = if ($env:OVERSEER_POLL_INTERVAL) { [Math]::Max(1, [int]([double]$env:OVERSEER_POLL_INTERVAL * 1000)) } else { 250 }
 $script:DefaultTimeout = if ($env:OVERSEER_TIMEOUT) { [int]$env:OVERSEER_TIMEOUT } else { 600 }
+$script:QuotaWarn = 90
+$script:QuotaTtl = 300
 $script:TranscriptCache = @{}
 $script:CommandExitCode = 0
 $script:LastSshExitCode = 0
 
 function Fail([string]$Message) { throw "overseer: $Message" }
+
+if ($env:OVERSEER_QUOTA_WARN) {
+  $parsedQuotaWarn = 0
+  if (-not [int]::TryParse($env:OVERSEER_QUOTA_WARN, [ref]$parsedQuotaWarn)) {
+    Fail "OVERSEER_QUOTA_WARN must be a percentage between 1 and 100, got: '$($env:OVERSEER_QUOTA_WARN)'"
+  }
+  $script:QuotaWarn = $parsedQuotaWarn
+}
+if ($script:QuotaWarn -lt 1 -or $script:QuotaWarn -gt 100) {
+  Fail "OVERSEER_QUOTA_WARN must be a percentage between 1 and 100, got: '$($env:OVERSEER_QUOTA_WARN)'"
+}
+if ($env:OVERSEER_QUOTA_TTL) {
+  $parsedQuotaTtl = 0
+  if (-not [int]::TryParse($env:OVERSEER_QUOTA_TTL, [ref]$parsedQuotaTtl)) {
+    Fail "OVERSEER_QUOTA_TTL must be a whole number of seconds >= 1, got: '$($env:OVERSEER_QUOTA_TTL)'"
+  }
+  $script:QuotaTtl = $parsedQuotaTtl
+}
+if ($script:QuotaTtl -lt 1) {
+  Fail "OVERSEER_QUOTA_TTL must be a whole number of seconds >= 1, got: '$($env:OVERSEER_QUOTA_TTL)'"
+}
 
 function ConvertTo-BrokerName([string]$Target) {
   if (-not $Target -or $Target -eq '-' -or $Target -eq 'default') { return 'overseer-broker' }
@@ -212,29 +235,36 @@ function Get-AgentContext([string]$Target, [string]$Want = '', [switch]$AllowNoT
 
 function Test-Awaiting([string]$Snapshot) {
   $lines = @($Snapshot -split "`r?`n")
-  $options = New-Object 'object[]' $lines.Count
+  $options = [Collections.Generic.List[object]]::new()
   for ($i = 0; $i -lt $lines.Count; $i++) {
     if ($lines[$i].TrimStart() -match '^(?<mark>[❯›>])?\s*(?<number>[0-9]+)[.)]\s+') {
-      $options[$i] = [PSCustomObject]@{
+      $options.Add([PSCustomObject]@{
+        Line = $i
         Number = [int]$Matches.number
         Marked = [bool]$Matches.mark
-      }
+      })
     }
   }
   for ($i = 0; $i -lt $options.Count; $i++) {
-    if ($null -eq $options[$i]) { continue }
     $j = $i
     $count = 0
     $marked = 0
-    $previous = 0
-    while ($j -lt $options.Count -and $null -ne $options[$j] -and ($j -eq $i -or $options[$j].Number -eq ($previous + 1))) {
-      $previous = $options[$j].Number
+    while ($j -lt $options.Count) {
+      if ($j -gt $i) {
+        if ($options[$j].Number -ne ($options[$j - 1].Number + 1)) { break }
+        $gap = $options[$j].Line - $options[$j - 1].Line - 1
+        if ($gap -gt 3) { break }
+        $descriptionOnly = $true
+        for ($lineIndex = $options[$j - 1].Line + 1; $lineIndex -lt $options[$j].Line; $lineIndex++) {
+          if ($lines[$lineIndex].Trim() -and $lines[$lineIndex] -notmatch '^\s{3,}\S') { $descriptionOnly = $false; break }
+        }
+        if (-not $descriptionOnly) { break }
+      }
       $count++
       if ($options[$j].Marked) { $marked++ }
       $j++
     }
     if ($count -ge 2 -and $marked -ge 1 -and $marked -lt $count) { return $true }
-    $i = $j - 1
   }
   return $false
 }
@@ -318,6 +348,262 @@ function Get-Message([string]$Value) {
   return $Value
 }
 
+function ConvertTo-QuotaEpoch($Value) {
+  if ($null -eq $Value -or [string]$Value -eq '' -or [string]$Value -eq '0') { return [long]0 }
+  $epoch = [long]0
+  if ([long]::TryParse([string]$Value, [ref]$epoch)) { return $epoch }
+  $stamp = [DateTimeOffset]::MinValue
+  if ([DateTimeOffset]::TryParse([string]$Value, [Globalization.CultureInfo]::InvariantCulture,
+      [Globalization.DateTimeStyles]::AssumeUniversal, [ref]$stamp)) { return $stamp.ToUnixTimeSeconds() }
+  return [long]0
+}
+
+function Get-QuotaDuration([long]$Epoch) {
+  $seconds = $Epoch - [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+  if ($seconds -le 0) { return 'now' }
+  $days = [Math]::Floor($seconds / 86400)
+  $hours = [Math]::Floor(($seconds % 86400) / 3600)
+  $minutes = [Math]::Floor(($seconds % 3600) / 60)
+  if ($days -gt 0) { return "${days}d${hours}h" }
+  if ($hours -gt 0) { return "${hours}h${minutes}m" }
+  return "${minutes}m"
+}
+
+function ConvertTo-ClaudeQuotaRows($Payload) {
+  if ($null -eq $Payload -or [string]$Payload -eq '') { return @() }
+  $data = if ($Payload -is [string]) { $Payload | ConvertFrom-Json -Depth 100 } else { $Payload }
+  $rows = foreach ($limit in @($data.limits)) {
+    $label = if ($limit.kind) { [string]$limit.kind } else { 'quota' }
+    if ($limit.scope.model.display_name) { $label += ":$($limit.scope.model.display_name)" }
+    [PSCustomObject]@{
+      Window = $label
+      UsedPercent = [double]$(if ($null -ne $limit.percent) { $limit.percent } else { 0 })
+      ResetsAt = ConvertTo-QuotaEpoch $limit.resets_at
+      Severity = if ($limit.severity) { [string]$limit.severity } else { 'normal' }
+    }
+  }
+  return @($rows)
+}
+
+function Get-CodexWindowLabel($Minutes) {
+  if ($null -eq $Minutes) { return 'quota' }
+  $value = [int]$Minutes
+  if (($value % 1440) -eq 0) { return "$([int]($value / 1440))d" }
+  if (($value % 60) -eq 0) { return "$([int]($value / 60))h" }
+  return "${value}m"
+}
+
+function ConvertTo-CodexQuotaRows($RateLimits) {
+  if ($null -eq $RateLimits) { return @() }
+  $rows = foreach ($window in @($RateLimits.primary, $RateLimits.secondary)) {
+    if ($null -eq $window) { continue }
+    [PSCustomObject]@{
+      Window = Get-CodexWindowLabel $window.window_minutes
+      UsedPercent = [double]$(if ($null -ne $window.used_percent) { $window.used_percent } else { 0 })
+      ResetsAt = ConvertTo-QuotaEpoch $window.resets_at
+      Severity = 'normal'
+    }
+  }
+  return @($rows)
+}
+
+function Get-QuotaBreach($Rows) {
+  foreach ($row in @($Rows)) {
+    if ($row.Severity -ne 'normal' -or [Math]::Floor([double]$row.UsedPercent) -ge $script:QuotaWarn) { return $row }
+  }
+  return $null
+}
+
+function Write-NativeQuotaRows($Rows) {
+  foreach ($row in @($Rows)) {
+    $percent = [Math]::Floor([double]$row.UsedPercent)
+    $when = if ([long]$row.ResetsAt -gt 0) { "resets in $(Get-QuotaDuration ([long]$row.ResetsAt))" } else { '' }
+    if ($row.Severity -ne 'normal' -or $percent -ge $script:QuotaWarn) {
+      '  quota {0,-20} {1,5}%  {2,-16} <-- {3}' -f $row.Window, $percent, $when, ([string]$row.Severity).ToUpperInvariant()
+    } else {
+      '  quota {0,-20} {1,5}%  {2}' -f $row.Window, $percent, $when
+    }
+  }
+}
+
+function Get-ClaudeCredentialsPath {
+  $claudeHome = if ($env:CLAUDE_HOME) { $env:CLAUDE_HOME } else { Join-Path $env:USERPROFILE '.claude' }
+  Join-Path $claudeHome '.credentials.json'
+}
+
+function Get-ClaudeQuotaUnavailableReason([int]$Code) {
+  $path = Get-ClaudeCredentialsPath
+  if ($Code -eq 2) { return "no OAuth credentials in $path — normal on a third-party backend (Bedrock/Vertex/API key/proxy), which has no subscription window" }
+  if ($Code -eq 3) { return "the OAuth token in $path has expired — overseer cannot refresh it; run any claude session once to renew it" }
+  return 'could not reach https://api.anthropic.com/api/oauth/usage (network, or the endpoint changed)'
+}
+
+function Get-ClaudeOAuthCredential {
+  $path = Get-ClaudeCredentialsPath
+  if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return [PSCustomObject]@{ Code = 2; Token = '' } }
+  try { $credential = Get-Content -Raw -LiteralPath $path | ConvertFrom-Json -Depth 100 }
+  catch { return [PSCustomObject]@{ Code = 2; Token = '' } }
+  $token = [string]$credential.claudeAiOauth.accessToken
+  if (-not $token) { return [PSCustomObject]@{ Code = 2; Token = '' } }
+  $expires = [long]$credential.claudeAiOauth.expiresAt
+  if ($expires -le [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()) { return [PSCustomObject]@{ Code = 3; Token = '' } }
+  [PSCustomObject]@{ Code = 0; Token = $token }
+}
+
+function Invoke-ClaudeQuotaApi([string]$AccessToken) {
+  $headers = @{
+    Authorization = "Bearer $AccessToken"
+    'anthropic-beta' = 'oauth-2025-04-20'
+    Accept = 'application/json'
+  }
+  Invoke-RestMethod -Method Get -Uri 'https://api.anthropic.com/api/oauth/usage' -Headers $headers -TimeoutSec 15
+}
+
+function Get-ClaudeQuotaLive {
+  $credential = Get-ClaudeOAuthCredential
+  if ($credential.Code -ne 0) { return [PSCustomObject]@{ Available = $false; Code = $credential.Code; Payload = $null } }
+  try {
+    $payload = Invoke-ClaudeQuotaApi $credential.Token
+    [PSCustomObject]@{ Available = $true; Code = 0; Payload = $payload }
+  } catch {
+    [PSCustomObject]@{ Available = $false; Code = 4; Payload = $null }
+  }
+}
+
+function Get-ClaudeQuotaCachePath { Join-Path (Join-Path $script:Root 'cache') 'quota-claude.json' }
+
+function Set-ClaudeQuotaCache($Payload) {
+  $path = Get-ClaudeQuotaCachePath
+  $dir = Split-Path -Parent $path
+  New-Item -ItemType Directory -Force -Path $dir | Out-Null
+  $temp = "$path.$PID"
+  try {
+    $Payload | ConvertTo-Json -Depth 100 -Compress | Set-Content -LiteralPath $temp -Encoding UTF8
+    Move-Item -LiteralPath $temp -Destination $path -Force
+  } finally { Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue }
+}
+
+function Get-ClaudeQuotaCached {
+  $path = Get-ClaudeQuotaCachePath
+  if (Test-Path -LiteralPath $path -PathType Leaf) {
+    $age = [DateTime]::UtcNow - (Get-Item -LiteralPath $path).LastWriteTimeUtc
+    if ($age.TotalSeconds -lt $script:QuotaTtl) {
+      try { return [PSCustomObject]@{ Available = $true; Code = 0; Payload = (Get-Content -Raw -LiteralPath $path | ConvertFrom-Json -Depth 100) } } catch {}
+    }
+  }
+  $result = Get-ClaudeQuotaLive
+  if ($result.Available) { try { Set-ClaudeQuotaCache $result.Payload } catch {} }
+  return $result
+}
+
+function Get-TranscriptUsage([string]$Kind, [string]$Path) {
+  $context = if ($Kind -eq 'codex') { '0/0' } else { '0' }
+  $rateLimits = $null
+  $plan = '?'
+  $limit = '?'
+  if (-not $Path -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+    return [PSCustomObject]@{ Context = $context; Rows = @(); Plan = $plan; Limit = $limit }
+  }
+  $stream = [IO.FileStream]::new($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+  $reader = [IO.StreamReader]::new($stream, [Text.Encoding]::UTF8, $true)
+  try {
+    while ($null -ne ($line = $reader.ReadLine())) {
+      if (-not $line) { continue }
+      try { $event = $line | ConvertFrom-Json -Depth 100 } catch { continue }
+      if ($Kind -eq 'claude' -and $event.type -eq 'assistant' -and $event.message.usage) {
+        $usage = $event.message.usage
+        $context = [long]$usage.input_tokens + [long]$usage.cache_read_input_tokens + [long]$usage.cache_creation_input_tokens
+      }
+      if ($Kind -eq 'codex' -and $event.type -eq 'event_msg' -and $event.payload.type -eq 'token_count' -and $event.payload.info) {
+        $info = $event.payload.info
+        $context = "$([long]$info.last_token_usage.total_tokens)/$([long]$info.model_context_window)"
+        if ($event.payload.rate_limits) {
+          $rateLimits = $event.payload.rate_limits
+          if ($rateLimits.plan_type) { $plan = [string]$rateLimits.plan_type }
+          if ($rateLimits.limit_id) { $limit = [string]$rateLimits.limit_id }
+        }
+      }
+    }
+  } finally { $reader.Dispose(); $stream.Dispose() }
+  [PSCustomObject]@{ Context = [string]$context; Rows = @(ConvertTo-CodexQuotaRows $rateLimits); Plan = $plan; Limit = $limit }
+}
+
+function Write-ClaudeUsage([string]$Target, [string]$Transcript, [bool]$Json) {
+  $result = Get-ClaudeQuotaLive
+  $usage = if ($Transcript) { Get-TranscriptUsage claude $Transcript } else { $null }
+  if (-not $result.Available) {
+    $why = Get-ClaudeQuotaUnavailableReason $result.Code
+    if ($Json) { [ordered]@{ harness = 'claude'; pane = $Target; quota = $null; unavailable = $why } | ConvertTo-Json -Depth 10 -Compress }
+    else {
+      "# claude$(if ($Target) { " $Target" })  account quota"
+      "  quota   n/a            $why"
+      if ($usage) { '  context {0,16} tokens in this session (auto-compacts; informational, never a fault)' -f $usage.Context }
+    }
+    return
+  }
+  try { Set-ClaudeQuotaCache $result.Payload } catch {}
+  $rows = @(ConvertTo-ClaudeQuotaRows $result.Payload)
+  if ($Json) {
+    $quota = @($rows | ForEach-Object { [ordered]@{ window = $_.Window; used_percent = $_.UsedPercent; resets_at = $_.ResetsAt; severity = $_.Severity } })
+    [ordered]@{ harness = 'claude'; pane = $Target; quota = $quota } | ConvertTo-Json -Depth 10 -Compress
+    return
+  }
+  "# claude$(if ($Target) { " $Target" })  account quota (live)"
+  Write-NativeQuotaRows $rows
+  if ($usage) { '  context {0,16} tokens in this session (auto-compacts; informational, never a fault)' -f $usage.Context }
+}
+
+function Write-CodexUsage([string]$Target, [string]$Transcript, [bool]$Json) {
+  $usage = Get-TranscriptUsage codex $Transcript
+  if ($Json) {
+    $quota = @($usage.Rows | ForEach-Object { [ordered]@{ window = $_.Window; used_percent = $_.UsedPercent; resets_at = $_.ResetsAt; severity = $_.Severity } })
+    [ordered]@{ harness = 'codex'; pane = $Target; quota = $quota; context = $usage.Context } | ConvertTo-Json -Depth 10 -Compress
+    return
+  }
+  "# codex$(if ($Target) { " $Target" })  plan=$($usage.Plan) limit=$($usage.Limit)"
+  if ($usage.Rows.Count) { Write-NativeQuotaRows $usage.Rows }
+  else { '  quota   n/a            no subscription window in the rollout — normal on a third-party backend' }
+  '  context {0,16} tokens (auto-compacts; informational, never a fault)' -f $usage.Context
+}
+
+function Get-QuotaWarningText($Context) {
+  if ($null -eq $Context -or $null -eq $Context.Stat) { return '' }
+  $rows = if ($Context.Stat.Kind -eq 'claude') {
+    $result = Get-ClaudeQuotaCached
+    if (-not $result.Available) { return '' }
+    @(ConvertTo-ClaudeQuotaRows $result.Payload)
+  } elseif ($Context.Stat.Kind -eq 'codex') {
+    if (-not $Context.Stat.Transcript) { return '' }
+    @(Get-TranscriptUsage codex $Context.Stat.Transcript).Rows
+  } else { return '' }
+  $breach = Get-QuotaBreach $rows
+  if ($null -eq $breach) { return '' }
+  "overseer: WARNING $($Context.Stat.Kind) quota $($breach.Window) at $([Math]::Floor([double]$breach.UsedPercent))% — see: overseer.ps1 usage"
+}
+
+function Write-QuotaWarningForContext($Context) {
+  try {
+    $warning = Get-QuotaWarningText $Context
+    if ($warning) { [Console]::Error.WriteLine($warning) }
+  } catch {}
+}
+
+function Invoke-Usage([string[]]$Values) {
+  $json = $false
+  $target = ''
+  foreach ($value in $Values) {
+    if ($value -eq '--json') { $json = $true }
+    elseif ($value.StartsWith('-')) { Fail 'usage: overseer.ps1 usage [--json] [name]' }
+    elseif ($target) { Fail 'usage: overseer.ps1 usage [--json] [name]' }
+    else { $target = $value }
+  }
+  if (-not $target) { Write-ClaudeUsage '' '' $json; return }
+  $ctx = Get-AgentContext -Target $target -AllowNoTranscript
+  if ($ctx.Stat.Kind -eq 'claude') { Write-ClaudeUsage $target $ctx.Stat.Transcript $json; return }
+  if (-not $ctx.Stat.Transcript) { Fail "no rollout for $target yet (a 0-turn codex has none)" }
+  Write-CodexUsage $target $ctx.Stat.Transcript $json
+}
+
 function ConvertTo-PosixSingleQuoted {
   param([AllowEmptyString()][string]$Value)
   $quote = [string][char]39
@@ -326,10 +612,31 @@ function ConvertTo-PosixSingleQuoted {
 
 function ConvertFrom-SshOptionString([string]$Value) {
   if ([string]::IsNullOrWhiteSpace($Value)) { return @() }
-  $errors = $null
-  $tokens = @([Management.Automation.PSParser]::Tokenize($Value, [ref]$errors))
-  if ($errors) { Fail "could not parse SSH options '$Value': $($errors[0].Message)" }
-  return @($tokens | ForEach-Object { $_.Content })
+  $parts = [Collections.Generic.List[string]]::new()
+  $word = [Text.StringBuilder]::new()
+  $quote = [char]0
+  $started = $false
+  for ($i = 0; $i -lt $Value.Length; $i++) {
+    $ch = $Value[$i]
+    if ($quote -eq [char]0 -and [char]::IsWhiteSpace($ch)) {
+      if ($started) { $parts.Add($word.ToString()); $null = $word.Clear(); $started = $false }
+      continue
+    }
+    if ($ch -eq "'" -or $ch -eq '"') {
+      if ($quote -eq [char]0) { $quote = $ch; $started = $true; continue }
+      if ($quote -eq $ch) {
+        if (($i + 1) -lt $Value.Length -and $Value[$i + 1] -eq $ch) { $null = $word.Append($ch); $i++; continue }
+        $quote = [char]0; continue
+      }
+    }
+    if ($ch -eq '`' -and $quote -ne "'" -and ($i + 1) -lt $Value.Length) {
+      $i++; $null = $word.Append($Value[$i]); $started = $true; continue
+    }
+    $null = $word.Append($ch); $started = $true
+  }
+  if ($quote -ne [char]0) { Fail "could not parse SSH options '$Value': unclosed $quote quote" }
+  if ($started) { $parts.Add($word.ToString()) }
+  return @($parts)
 }
 
 function Resolve-SshInvocation {
@@ -374,8 +681,8 @@ function Invoke-OverseerSsh {
     if (-not $process.Start()) { Fail 'could not start ssh' }
     $stdout = if ($Quiet) { $process.StandardOutput.ReadToEndAsync() } else { $null }
     $stderr = if ($Quiet) { $process.StandardError.ReadToEndAsync() } else { $null }
-    $input = [IO.File]::OpenRead($InputPath)
-    try { $input.CopyTo($process.StandardInput.BaseStream) } finally { $input.Dispose(); $process.StandardInput.Close() }
+    $archiveStream = [IO.File]::OpenRead($InputPath)
+    try { $archiveStream.CopyTo($process.StandardInput.BaseStream) } finally { $archiveStream.Dispose(); $process.StandardInput.Close() }
     $process.WaitForExit()
     if ($Quiet) { $null = $stdout.Result; $null = $stderr.Result }
     $script:LastSshExitCode = $process.ExitCode
@@ -530,6 +837,7 @@ function Invoke-Send([string[]]$Values) {
   $p = Parse-SendArgs $Values $false
   $placed = Place-Prompt -Target $p.Target -Prompt $p.Prompt -Confirm (-not $p.Yes) -Force $p.Force
   $result = Wait-ForTurn -Target $p.Target -Baseline $placed.Baseline -Timeout 10 -Prompt $p.Prompt -StartedOnly
+  Write-QuotaWarningForContext $result.Context
   if ($result.Outcome -eq 'awaiting') { Write-Awaiting $p.Target $result.Snapshot; return }
   if ($result.Outcome -ne 'started') { Fail "sent to '$($p.Target)' but could not confirm the turn started within 10s; peek before resending" }
   "sent to $($p.Target) (turn started):`n$($p.Prompt)"
@@ -540,6 +848,7 @@ function Invoke-Chat([string[]]$Values) {
   $placed = Place-Prompt -Target $p.Target -Prompt $p.Prompt -Confirm (-not $p.Yes) -Force $p.Force
   [Console]::Error.WriteLine("# sent to $($p.Target) (waiting for the turn...)")
   $result = Wait-ForTurn -Target $p.Target -Baseline $placed.Baseline -Timeout $p.Timeout -Prompt $p.Prompt
+  Write-QuotaWarningForContext $result.Context
   if ($result.Outcome -eq 'awaiting') { Write-Awaiting $p.Target $result.Snapshot; return }
   if ($result.Outcome -eq 'timeout') { Fail "timeout after $($p.Timeout)s; do not resend—use wait, then read" }
   if ($result.Outcome -eq 'stopped') { Fail 'the turn stopped without producing a reply; peek before deciding whether to resend' }
@@ -552,11 +861,12 @@ function Invoke-Chat([string[]]$Values) {
 function Invoke-Wait([string[]]$Values) {
   $target = $Values[0]; if (-not $target) { Fail 'usage: overseer.ps1 wait <name> [timeout]' }
   $timeout = if ($Values.Count -gt 1) { [int]$Values[1] } else { $script:DefaultTimeout }
-  $ctx = Get-AgentContext $target
   $snap = Get-Snapshot $target
   if (Test-Awaiting $snap) { Write-Awaiting $target $snap; return }
-  if (-not ($ctx.State.Busy -or $ctx.State.Running)) { 'idle'; return }
+  $ctx = Get-AgentContext $target
+  if (-not ($ctx.State.Busy -or $ctx.State.Running)) { Write-QuotaWarningForContext $ctx; 'idle'; return }
   $result = Wait-ForTurn -Target $target -Baseline $ctx.State.TurnCount -Timeout $timeout
+  Write-QuotaWarningForContext $result.Context
   if ($result.Outcome -eq 'awaiting') { Write-Awaiting $target $result.Snapshot }
   elseif ($result.Outcome -eq 'timeout') { Fail "timeout after ${timeout}s; turn is still running" }
   else { 'idle' }
@@ -656,6 +966,7 @@ Native Windows controller (local workers need no Linux, WSL, tmux, SSH, or Admin
   send <name> [--yes] [--force] <prompt|->       send and confirm the turn started
   chat <name> [--yes] [--force] <prompt|-> [s]  send, wait, print the reply
   wait <name> [timeout]                          wait for the current turn
+  usage [--json] [name]                         account quota and optional worker context
   interrupt <name>                               stop the current turn
   slash <name> </command>                        run an agent slash command
   menu <name> <item> [nav-key]                   navigate a menu by screen verification
@@ -684,6 +995,7 @@ function Invoke-Main {
     'send' { Invoke-Send $Rest }
     'chat' { Invoke-Chat $Rest }
     'wait' { Invoke-Wait $Rest }
+    'usage' { Invoke-Usage $Rest }
     'interrupt' { Invoke-Interrupt $Rest }
     'quit' { Invoke-Quit $Rest }
     'stop' { Invoke-Stop $Rest }
