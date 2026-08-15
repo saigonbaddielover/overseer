@@ -136,6 +136,7 @@ Check 'src: native shell cancels a stale input line first'      $true  (($native
 Check 'src: native on marks remote commands as cross-machine'   $true  ($nativeSrc -match 'OVS_VIA_ON=1 \$remoteBin')
 Check 'src: native SSH keeps the ten-second connect timeout'     $true  ($nativeSrc -match "'-o', 'ConnectTimeout=10'")
 Check 'src: native SSH omits unsupported connection sharing'    $false ($nativeSrc -match 'ControlMaster|ControlPath|ControlPersist')
+Check 'src: native deploy selects one tar executable'            $true  ($nativeSrc -match 'Get-Command tar[^\r\n]+Select-Object -First 1')
 
 Import-Fn 'overseer.ps1' 'Get-TextBlocks'
 Import-Fn 'overseer.ps1' 'Read-TranscriptState'

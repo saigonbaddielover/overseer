@@ -388,7 +388,7 @@ function Invoke-Deploy([string[]]$Values) {
   $hostName = $Values[0]
   if (-not $hostName) { Fail "usage: overseer.ps1 deploy <host>" }
   Assert-SshAvailable
-  $tar = Get-Command tar -CommandType Application -ErrorAction SilentlyContinue
+  $tar = Get-Command tar -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
   if (-not $tar) { Fail 'tar.exe is required for deploy but is not on PATH (Windows 10+ normally includes bsdtar)' }
   $dest = if ($env:OVERSEER_REMOTE_DIR) { $env:OVERSEER_REMOTE_DIR } else { '.overseer' }
   $archive = Join-Path ([IO.Path]::GetTempPath()) ("overseer-$PID-$([Guid]::NewGuid().ToString('N')).tar")
