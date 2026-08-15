@@ -1,0 +1,13 @@
+ ☐ Verify
+
+Allow native Windows verification?
+
+❯ 1. Yes
+     Allow native Windows verification to proceed.
+  2. No
+     Do not allow native Windows verification.
+  3. Type something.
+──────────────────────────────────────────────────────────────────────────────
+  4. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel

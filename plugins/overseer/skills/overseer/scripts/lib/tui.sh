@@ -44,12 +44,22 @@ _awaiting_text() {
       m = (s ~ "^(" galt ")[ \t]*[0-9]+[.)][ \t]")
       t = s; if (m) sub("^(" galt ")[ \t]*", "", t)
       if (t ~ /^[0-9]+[.)][ \t]/) { opt[NR] = 1; mark[NR] = m; num[NR] = t + 0 }
+      desc[NR] = ($0 ~ /^[ \t]*$/ || $0 ~ /^[ \t][ \t][ \t]+[^ \t]/)
     }
     END {
       for (i = 1; i <= NR; i++) {
         if (!opt[i]) continue
-        j = i; n = 0; k = 0
-        while (opt[j] && (j == i || num[j] == num[j - 1] + 1)) { n++; k += mark[j]; j++ }
+        j = i; n = 0; k = 0; prev = 0
+        while (j <= NR && opt[j] && (prev == 0 || num[j] == num[prev] + 1)) {
+          n++; k += mark[j]; prev = j; j++
+          gap = 0; gapok = 1
+          while (j <= NR && !opt[j]) {
+            gap++
+            if (gap > 3 || !desc[j]) { gapok = 0; break }
+            j++
+          }
+          if (!gapok) break
+        }
         if (n >= 2 && k >= 1 && k < n) {
           lo = i - 2; if (lo < 1) lo = 1
           for (p = lo; p < j; p++) if (line[p] ~ /[^ \t]/) print line[p]

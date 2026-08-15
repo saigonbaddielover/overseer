@@ -156,6 +156,8 @@ eq "turn_advanced codex bytes at EOF"        ""    "$(_turn_advanced codex "$X" 
 eq "codex aborted!=busy"   ""                          "$(_cx_is_busy "$FIX/codex-aborted.jsonl" && echo busy)"
 
 eq "awaiting claude"       "0"                         "$(_awaiting_text "$(cat "$FIX/awaiting-claude.txt")" >/dev/null 2>&1; echo $?)"
+eq "awaiting claude with descriptions" "0"              "$(_awaiting_text "$(cat "$FIX/awaiting-claude-described.txt")" >/dev/null 2>&1; echo $?)"
+eq "awaiting claude with descriptions on windows" "0"   "$(_awaiting_text "$(cat "$FIX/awaiting-claude-described.txt")" '❯›>' >/dev/null 2>&1; echo $?)"
 eq "awaiting codex"        "0"                         "$(_awaiting_text "$(cat "$FIX/awaiting-codex.txt")" >/dev/null 2>&1; echo $?)"
 eq "awaiting none"         "1"                         "$(_awaiting_text "$(cat "$FIX/awaiting-none.txt")" >/dev/null 2>&1; echo $?)"
 eq "compacting claude"     "0"  "$(_compacting_text "$(cat "$FIX/compacting-claude.txt")" >/dev/null 2>&1; echo $?)"

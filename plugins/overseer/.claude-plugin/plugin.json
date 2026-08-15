@@ -1,6 +1,6 @@
 {
   "name": "overseer",
-  "version": "0.56.0",
+  "version": "0.57.0",
   "description": "One agent that oversees others: drive and read Claude Code, Codex, and shell sessions from native Windows consoles or Linux tmux panes, locally or over SSH.",
   "author": {
     "name": "saigonbaddielover"
