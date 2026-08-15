@@ -5,6 +5,23 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.56.0] - 2026-08-15
+
+### Added
+
+- **Native Windows can now drive Linux tmux targets over SSH.** `overseer.ps1 on <host> <command>
+  [args]` runs the complete Bash controller remote-side, preserves every argument with POSIX
+  single-quote escaping, propagates its exit code, and prefixes `OVS_VIA_ON=1` so named Claude sessions
+  accept intentional cross-machine keystroke delivery.
+- `overseer.ps1 deploy <host>` streams the bundled `scripts/` directory with Windows `tar.exe` to the
+  same `$HOME/<dir>/scripts` layout as Bash, and default-path `on` auto-deploys it on first touch.
+
+### Changed
+
+- Native Windows SSH keeps `ConnectTimeout=10` and the `OVERSEER_SSH`/`OVERSEER_SSH_OPTS` overrides but
+  deliberately omits the unsupported OpenSSH `ControlMaster`, `ControlPath`, and `ControlPersist`
+  options.
+
 ## [0.55.0] - 2026-08-15
 
 ### Added

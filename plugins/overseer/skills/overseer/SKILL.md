@@ -1,6 +1,6 @@
 ---
 name: overseer
-description: Read or drive ANOTHER live agent process from outside it — Claude Code, Codex, or a shell — from a native Windows controller or in a local/remote Linux tmux pane. Use when the user wants to create, list, read, message, wait for, interrupt, or stop visible agent workers. On Windows, overseer creates and drives local named-pipe broker consoles with PowerShell and needs no Linux, WSL, tmux, SSH, or Administrator access. On Linux it discovers and drives tmux panes locally or over SSH and can drive remote Windows desktops with win HOST verbs. read/chat/send/wait/list auto-detect Claude Code or Codex.
+description: Read or drive ANOTHER live agent process from outside it — Claude Code, Codex, or a shell — from a native Windows controller or in a local/remote Linux tmux pane. Use when the user wants to create, list, read, message, wait for, interrupt, or stop visible agent workers. On Windows, local workers use named-pipe broker consoles with no Linux, WSL, tmux, SSH, or Administrator access; the native on HOST command runs the Bash controller on a Linux host over OpenSSH. On Linux it discovers and drives tmux panes locally or over SSH and can drive remote Windows desktops with win HOST verbs. read/chat/send/wait/list auto-detect Claude Code or Codex.
 ---
 
 # overseer — read and drive live Claude Code, Codex, and shell workers
@@ -30,9 +30,10 @@ $OverseerBin = '<skill-directory>\scripts\overseer.ps1'
 ```
 
 The native command set is `start`, `list`, `peek`, `keys`, `sh`, `read`, `send`, `chat`, `wait`,
-`interrupt`, `slash`, `menu`, `quit`, `stop`, and `doctor`. Commands target a worker name created by
-`start <name> [pwsh|claude|codex] [workdir]`. Only workers created by this entry point are drivable; do
-not claim it can attach to an arbitrary existing console.
+`interrupt`, `slash`, `menu`, `quit`, `stop`, `doctor`, `on`, and `deploy`. Local commands target a
+worker name created by `start <name> [pwsh|claude|codex] [workdir]`; they cannot attach to an arbitrary
+existing Windows console. `on <host> <command> [args]` runs any bundled Bash command on a Linux SSH
+host, auto-deploying the default remote binary on first touch; `deploy <host>` refreshes it explicitly.
 Sending is still a side effect and requires the user's explicit request.
 
 On **Linux**, use the Bash entry point. In Claude Code the plugin root is already in the environment:

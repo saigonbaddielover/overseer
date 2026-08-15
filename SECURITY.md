@@ -50,6 +50,11 @@ stores descriptors under that user's `%LOCALAPPDATA%\overseer`; no Administrator
 task is involved. Its `chat`, `keys`, `sh`, `interrupt`, and `stop` commands still act on real local
 processes and require the same explicit user authorization as their remote counterparts.
 
+Its `on <host>` and `deploy <host>` commands are a separate SSH trust boundary: they use the current
+user's OpenSSH configuration and credentials, store no keys, and execute the bundled Bash controller on
+the selected Linux host. `deploy` writes `$HOME/<dir>/scripts`; `on ... sh` and agent-driving commands
+can execute arbitrary remote work, so the same explicit-authorization rule applies.
+
 These are remote execution on somebody's live desktop and deserve the same care as `sh`:
 
 - `win <host> start` spawns a **visible** process in the console user's session; `win <host> keys`, `sh`

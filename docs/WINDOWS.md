@@ -17,6 +17,31 @@ already in the interactive desktop session. It reuses the same named-pipe protoc
 I/O described below. It can drive only workers it created—attaching to an arbitrary existing Windows
 Terminal tab is not supported.
 
+### Driving Linux hosts from Windows
+
+The native controller exposes exactly two cross-host commands:
+
+```powershell
+& <skill-dir>\scripts\overseer.ps1 on sandbox list
+& <skill-dir>\scripts\overseer.ps1 on sandbox read worker
+& <skill-dir>\scripts\overseer.ps1 on sandbox chat --yes worker 'Review the change' 600
+& <skill-dir>\scripts\overseer.ps1 deploy sandbox
+```
+
+`on` invokes the complete Bash controller on the Linux host, so the Windows machine needs only the
+optional OpenSSH Client; `/proc`, tmux, jq, and transcript parsing remain remote-side. First touch probes
+`$HOME/.overseer/scripts/overseer` and auto-deploys the bundled `scripts/` directory when it is absent.
+`OVERSEER_REMOTE_DIR`, `OVERSEER_REMOTE_BIN`, `OVERSEER_NO_AUTODEPLOY`, `OVERSEER_SSH`, and
+`OVERSEER_SSH_OPTS` match the Bash controller.
+
+Windows OpenSSH does not implement `ControlMaster`, `ControlPath`, or `ControlPersist`, so the native
+path never passes them. It retains `ConnectTimeout=10`. Deployment requires the `tar.exe` shipped with
+Windows 10+ and streams an archive through SSH to preserve the exact `$HOME/<dir>/scripts` layout used
+by Bash deploy; it then marks `scripts/overseer` executable because an archive sourced from NTFS does
+not preserve the POSIX mode bit. Every remote argument is POSIX single-quoted independently, including
+embedded quotes and newlines, and the command is prefixed with `OVS_VIA_ON=1` so a named Claude target
+accepts the cross-machine delivery instead of tripping the local peer guard.
+
 The remainder of this document describes the remote `Linux → SSH → Windows` path. That path still uses
 `%ProgramData%`, an administrator SSH login, and an interactive scheduled task to cross Session 0 → 1.
 

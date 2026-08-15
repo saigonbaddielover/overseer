@@ -11,7 +11,7 @@
       "source": "./plugins/overseer",
       "category": "development",
       "description": "One agent that oversees others: drive/read Claude Code, Codex, and shell workers from native Windows consoles or Linux tmux panes.",
-      "version": "0.55.0",
+      "version": "0.56.0",
       "license": "MIT",
       "keywords": [
         "tmux",
