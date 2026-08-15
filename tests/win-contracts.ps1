@@ -133,6 +133,9 @@ Check 'src: native transcript tail shares a live rollout'       $true  ($nativeS
 Check 'src: native transcript cache gates on mtime and size'     $true  (($nativeSrc -match 'Get-CachedTranscriptState') -and ($nativeSrc -match '-Size \$stat\.Size -Mtime \$stat\.Mtime'))
 Check 'src: native delivery refuses codex shell-command mode'   $true  ($nativeSrc -match "Codex runs a message starting with '!'")
 Check 'src: native shell cancels a stale input line first'      $true  (($nativeSrc -match "Name = 'C-c'") -and ($nativeSrc -match 'Invoke-BrokerClient -Op sh'))
+Check 'src: native on marks remote commands as cross-machine'   $true  ($nativeSrc -match 'OVS_VIA_ON=1 \$remoteBin')
+Check 'src: native SSH keeps the ten-second connect timeout'     $true  ($nativeSrc -match "'-o', 'ConnectTimeout=10'")
+Check 'src: native SSH omits unsupported connection sharing'    $false ($nativeSrc -match 'ControlMaster|ControlPath|ControlPersist')
 
 Import-Fn 'overseer.ps1' 'Get-TextBlocks'
 Import-Fn 'overseer.ps1' 'Read-TranscriptState'
@@ -174,6 +177,98 @@ foreach ($case in @(
 Check 'awaiting parity: numbering must be consecutive' $false (Test-Awaiting "2. b`n❯ 1. a")
 Check 'awaiting parity: menu may start above one'       $true  (Test-Awaiting "Proceed?`n> 4. Yes`n  5. No")
 Check 'awaiting parity: all marked is not a menu'       $false (Test-Awaiting "> 1. yes`n> 2. no")
+
+Import-Fn 'overseer.ps1' 'ConvertTo-PosixSingleQuoted'
+Check 'native quote: empty argument'       "''"          (ConvertTo-PosixSingleQuoted '')
+Check 'native quote: preserves spaces'     "'two words'" (ConvertTo-PosixSingleQuoted 'two words')
+Check 'native quote: escapes apostrophes'  "'one'\''s'"  (ConvertTo-PosixSingleQuoted "one's")
+Check 'native quote: preserves newlines'   "'line one`nline two'" (ConvertTo-PosixSingleQuoted "line one`nline two")
+
+Import-Fn 'overseer.ps1' 'ConvertFrom-SshOptionString'
+Import-Fn 'overseer.ps1' 'Fail'
+Import-Fn 'overseer.ps1' 'Resolve-SshInvocation'
+$oldSsh = $env:OVERSEER_SSH
+try {
+  $env:OVERSEER_SSH = 'ssh'
+  $resolvedSsh = Resolve-SshInvocation
+  Check 'native SSH: a one-token command stays one token' 0 $resolvedSsh.Prefix.Count
+  Check 'native SSH: default command resolves to ssh' $true ([bool]((Split-Path -Leaf $resolvedSsh.Path) -match '^ssh(\.exe)?$'))
+  $env:OVERSEER_SSH = 'overseer-command-that-does-not-exist'
+  $missingSsh = $false
+  try { $null = Resolve-SshInvocation } catch { $missingSsh = $_.Exception.Message -match 'OpenSSH Client' }
+  Check 'native SSH: missing client fails with installation guidance' $true $missingSsh
+} finally {
+  if ($null -eq $oldSsh) { Remove-Item Env:OVERSEER_SSH -ErrorAction SilentlyContinue } else { $env:OVERSEER_SSH = $oldSsh }
+}
+
+Import-Fn 'overseer.ps1' 'Invoke-On'
+$oldRemoteBin = $env:OVERSEER_REMOTE_BIN
+$oldNoAuto = $env:OVERSEER_NO_AUTODEPLOY
+$script:CapturedSsh = $null
+$script:EnsureCalls = 0
+$script:MockSshExit = 0
+function global:Assert-SshAvailable {}
+function global:Ensure-RemoteDeployed {
+  param([string]$HostName, [string]$RemoteBin)
+  $script:EnsureCalls++
+  $script:EnsuredHost = $HostName
+  $script:EnsuredBin = $RemoteBin
+}
+function global:Invoke-OverseerSsh {
+  param([string]$HostName, [string]$RemoteCommand, [string]$InputPath = '', [switch]$Quiet)
+  $script:CapturedSsh = [PSCustomObject]@{
+    HostName = $HostName; RemoteCommand = $RemoteCommand; InputPath = $InputPath
+    InputExisted = [bool]($InputPath -and (Test-Path -LiteralPath $InputPath)); Quiet = [bool]$Quiet
+  }
+  $script:LastSshExitCode = $script:MockSshExit
+}
+try {
+  Remove-Item Env:OVERSEER_REMOTE_BIN -ErrorAction SilentlyContinue
+  $env:OVERSEER_NO_AUTODEPLOY = '1'
+  $script:MockSshExit = 37
+  $message = "one's space`nnext line"
+  Invoke-On @('linux-box', 'chat', 'named', '--yes', $message)
+  $expectedRemote = "OVS_VIA_ON=1 `$HOME/.overseer/scripts/overseer 'chat' 'named' '--yes' 'one'\''s space`nnext line'"
+  Check 'native on: seam receives the selected host' 'linux-box' $script:CapturedSsh.HostName
+  Check 'native on: exact marker and quoted remote argv' $expectedRemote $script:CapturedSsh.RemoteCommand
+  Check 'native on: remote exit code propagates' 37 $script:CommandExitCode
+  Check 'native on: no-autodeploy skips the probe' 0 $script:EnsureCalls
+
+  Remove-Item Env:OVERSEER_NO_AUTODEPLOY -ErrorAction SilentlyContinue
+  $script:MockSshExit = 0
+  $script:EnsureCalls = 0
+  Invoke-On @('linux-box', 'list')
+  Check 'native on: default path auto-deploys on first touch' 1 $script:EnsureCalls
+  Check 'native on: probe uses the default remote binary' '$HOME/.overseer/scripts/overseer' $script:EnsuredBin
+
+  $env:OVERSEER_REMOTE_BIN = '/opt/overseer/bin'
+  $script:EnsureCalls = 0
+  Invoke-On @('linux-box', 'list')
+  Check 'native on: custom remote bin disables auto-deploy' 0 $script:EnsureCalls
+  Check 'native on: custom remote bin is executed' "OVS_VIA_ON=1 /opt/overseer/bin 'list'" $script:CapturedSsh.RemoteCommand
+} finally {
+  if ($null -eq $oldRemoteBin) { Remove-Item Env:OVERSEER_REMOTE_BIN -ErrorAction SilentlyContinue } else { $env:OVERSEER_REMOTE_BIN = $oldRemoteBin }
+  if ($null -eq $oldNoAuto) { Remove-Item Env:OVERSEER_NO_AUTODEPLOY -ErrorAction SilentlyContinue } else { $env:OVERSEER_NO_AUTODEPLOY = $oldNoAuto }
+}
+
+Import-Fn 'overseer.ps1' 'Ensure-RemoteDeployed'
+$script:DeployCalls = 0
+function global:Invoke-Deploy { param([string[]]$Values) $script:DeployCalls++; $script:CommandExitCode = 0 }
+$script:MockSshExit = 0
+Ensure-RemoteDeployed -HostName linux-box -RemoteBin '$HOME/.overseer/scripts/overseer'
+Check 'native on: present remote binary skips deploy' 0 $script:DeployCalls
+$script:MockSshExit = 1
+Ensure-RemoteDeployed -HostName linux-box -RemoteBin '$HOME/.overseer/scripts/overseer'
+Check 'native on: absent remote binary triggers deploy' 1 $script:DeployCalls
+Check 'native on: probe command matches Bash' '[ -f "$HOME/.overseer/scripts/overseer" ]' $script:CapturedSsh.RemoteCommand
+
+Import-Fn 'overseer.ps1' 'Invoke-Deploy'
+$script:ScriptDir = $scripts
+$script:MockSshExit = 0
+$deployOutput = Invoke-Deploy @('linux-box')
+Check 'native deploy: streams an existing tar archive through the SSH seam' $true $script:CapturedSsh.InputExisted
+Check 'native deploy: destination layout and executable bit match Bash' 'mkdir -p "$HOME/.overseer" && tar -C "$HOME/.overseer" -xf - && chmod +x "$HOME/.overseer/scripts/overseer"' $script:CapturedSsh.RemoteCommand
+Check 'native deploy: reports the destination' $true ([bool]($deployOutput -match 'linux-box:~/.overseer/'))
 
 if ($fail -eq 0) { Write-Host 'PASS: windows payload contracts'; exit 0 }
 Write-Host "FAIL: $fail contract check(s) failed"; exit 1

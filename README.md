@@ -116,13 +116,17 @@ $ov = '<installed-skill-directory>\scripts\overseer.ps1'
 & $ov chat worker --yes 'Inspect the failing tests and report the cause' 600
 & $ov read worker
 & $ov stop worker
+& $ov on sandbox list
+& $ov deploy sandbox
 ```
 
 The native command set is `start`, `list`, `peek`, `keys`, `sh`, `read`, `send`, `chat`, `wait`,
-`interrupt`, `slash`, `menu`, `quit`, `stop`, and `doctor`. It intentionally drives only consoles it
-created: unlike tmux, Windows has no server-owned pane that can safely expose the screen buffer of an
-arbitrary existing terminal. `--yes` skips the human confirmation after the prompt is visibly verified;
-agents should use it only after the user explicitly authorized that dispatch.
+`interrupt`, `slash`, `menu`, `quit`, `stop`, `doctor`, `on`, and `deploy`. Local commands intentionally
+drive only consoles this entry point created: unlike tmux, Windows has no server-owned pane that can
+safely expose the screen buffer of an arbitrary existing terminal. `on <host> <command> [args]` runs the
+whole Bash controller on a Linux host over OpenSSH; `deploy <host>` copies the bundled `scripts/` tree
+there. `--yes` skips the human confirmation after the prompt is visibly verified; agents should use it
+only after the user explicitly authorized that dispatch.
 `OVERSEER_TIMEOUT`, `OVERSEER_POLL_INTERVAL`, `OVERSEER_WIN_CLAUDE`, and `OVERSEER_WIN_CODEX` have the
 same meaning as on the Bash path; `OVERSEER_WINDOWS_HOME` overrides the local broker root.
 
@@ -231,16 +235,21 @@ overseer deploy sandbox                  # only needed to UPDATE the host after 
 ```
 
 `<host>` is any ssh target (a `user@host`, a `~/.ssh/config` alias, or a Tailscale MagicDNS name);
-credentials are ssh's own — no daemon, DB, or token store. overseer adds `ControlMaster`+`ControlPersist`
-so bursts of one-shot commands reuse one connection. A blocking `chat`/`wait`/`sh` polls remote-side and
-ssh just holds the pipe, so no separate event channel is needed. Pass `--yes` for a remote `chat`/`send`:
+credentials are ssh's own — no daemon, DB, or token store. The Bash controller adds
+`ControlMaster`+`ControlPersist` so bursts of one-shot commands reuse one connection. Native Windows
+OpenSSH does not support those options, so `overseer.ps1 on` deliberately omits them and keeps only
+`ConnectTimeout=10` plus `OVERSEER_SSH_OPTS`; its `deploy` verifies and streams the bundled tree with
+Windows 10+'s `tar.exe`, preserving the same `$HOME/<dir>/scripts` layout and restoring the entry
+point's executable bit after extraction (NTFS archives do not carry it). A blocking
+`chat`/`wait`/`sh` polls remote-side and ssh just holds the pipe, so no separate event channel is needed.
+Pass `--yes` for a remote `chat`/`send`:
 without a tty the confirm gate can't prompt, so it fails closed. Auto-deploy runs only for the default
 layout; set `OVERSEER_NO_AUTODEPLOY=1` to turn it off (then `deploy` by hand). Overrides:
 `OVERSEER_REMOTE_DIR` (where `deploy` writes, default `.overseer` under the remote `$HOME`) and
 `OVERSEER_REMOTE_BIN` (what `on` then executes, default `$HOME/.overseer/scripts/overseer`; setting it
 also disables auto-deploy, since a custom bin is yours to manage) — **change one and you must change the
-other to match** — plus `OVERSEER_SSH`, `OVERSEER_SSH_OPTS`, and `OVERSEER_SCP` for the Windows transcript
-fetch.
+other to match** — plus `OVERSEER_SSH` and `OVERSEER_SSH_OPTS` (`OVERSEER_SCP` is specific to the
+Linux-controller → Windows-target transcript fetch).
 
 The `on`/`deploy` model targets **Linux** (it runs overseer, which needs `/proc` + tmux). A **Windows**
 host in the tailnet is reached differently: overseer can't run there, so the `win <host> <verb>` commands

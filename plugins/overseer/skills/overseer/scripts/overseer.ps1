@@ -14,6 +14,8 @@ $script:BrokerPayload = Join-Path $script:ScriptDir 'win-broker.ps1'
 $script:PollMs = if ($env:OVERSEER_POLL_INTERVAL) { [Math]::Max(1, [int]([double]$env:OVERSEER_POLL_INTERVAL * 1000)) } else { 250 }
 $script:DefaultTimeout = if ($env:OVERSEER_TIMEOUT) { [int]$env:OVERSEER_TIMEOUT } else { 600 }
 $script:TranscriptCache = @{}
+$script:CommandExitCode = 0
+$script:LastSshExitCode = 0
 
 function Fail([string]$Message) { throw "overseer: $Message" }
 
@@ -316,6 +318,121 @@ function Get-Message([string]$Value) {
   return $Value
 }
 
+function ConvertTo-PosixSingleQuoted {
+  param([AllowEmptyString()][string]$Value)
+  $quote = [string][char]39
+  return $quote + $Value.Replace($quote, ($quote + '\' + $quote + $quote)) + $quote
+}
+
+function ConvertFrom-SshOptionString([string]$Value) {
+  if ([string]::IsNullOrWhiteSpace($Value)) { return @() }
+  $errors = $null
+  $tokens = @([Management.Automation.PSParser]::Tokenize($Value, [ref]$errors))
+  if ($errors) { Fail "could not parse SSH options '$Value': $($errors[0].Message)" }
+  return @($tokens | ForEach-Object { $_.Content })
+}
+
+function Resolve-SshInvocation {
+  $spec = if ($env:OVERSEER_SSH) { $env:OVERSEER_SSH } else { 'ssh' }
+  $parts = if (Test-Path -LiteralPath $spec -PathType Leaf) { @($spec) } else { @(ConvertFrom-SshOptionString $spec) }
+  $parts = @($parts)
+  if ($parts.Count -eq 0) { Fail 'ssh is required for on/deploy but OVERSEER_SSH is empty' }
+  $command = Get-Command $parts[0] -CommandType Application -ErrorAction SilentlyContinue
+  if (-not $command) {
+    Fail "ssh is required for on/deploy but '$($parts[0])' is not on PATH; install the Windows OpenSSH Client optional feature or set OVERSEER_SSH"
+  }
+  [PSCustomObject]@{ Path = $command.Source; Prefix = @($parts | Select-Object -Skip 1) }
+}
+
+function Assert-SshAvailable { $null = Resolve-SshInvocation }
+
+function Invoke-OverseerSsh {
+  param(
+    [Parameter(Mandatory = $true)][string]$HostName,
+    [Parameter(Mandatory = $true)][string]$RemoteCommand,
+    [string]$InputPath = '',
+    [switch]$Quiet
+  )
+  $ssh = Resolve-SshInvocation
+  $sshArgs = @($ssh.Prefix) + @('-o', 'ConnectTimeout=10') + @(ConvertFrom-SshOptionString $env:OVERSEER_SSH_OPTS) + @($HostName, $RemoteCommand)
+  if (-not $InputPath) {
+    if ($Quiet) { & $ssh.Path @sshArgs *> $null } else { & $ssh.Path @sshArgs }
+    $script:LastSshExitCode = $LASTEXITCODE
+    return
+  }
+
+  $start = [Diagnostics.ProcessStartInfo]::new()
+  $start.FileName = $ssh.Path
+  $start.UseShellExecute = $false
+  $start.RedirectStandardInput = $true
+  $start.RedirectStandardOutput = [bool]$Quiet
+  $start.RedirectStandardError = [bool]$Quiet
+  foreach ($arg in $sshArgs) { $null = $start.ArgumentList.Add([string]$arg) }
+  $process = [Diagnostics.Process]::new()
+  $process.StartInfo = $start
+  try {
+    if (-not $process.Start()) { Fail 'could not start ssh' }
+    $stdout = if ($Quiet) { $process.StandardOutput.ReadToEndAsync() } else { $null }
+    $stderr = if ($Quiet) { $process.StandardError.ReadToEndAsync() } else { $null }
+    $input = [IO.File]::OpenRead($InputPath)
+    try { $input.CopyTo($process.StandardInput.BaseStream) } finally { $input.Dispose(); $process.StandardInput.Close() }
+    $process.WaitForExit()
+    if ($Quiet) { $null = $stdout.Result; $null = $stderr.Result }
+    $script:LastSshExitCode = $process.ExitCode
+  } finally {
+    $process.Dispose()
+  }
+}
+
+function Invoke-Deploy([string[]]$Values) {
+  $hostName = $Values[0]
+  if (-not $hostName) { Fail "usage: overseer.ps1 deploy <host>" }
+  Assert-SshAvailable
+  $tar = Get-Command tar -CommandType Application -ErrorAction SilentlyContinue
+  if (-not $tar) { Fail 'tar.exe is required for deploy but is not on PATH (Windows 10+ normally includes bsdtar)' }
+  $dest = if ($env:OVERSEER_REMOTE_DIR) { $env:OVERSEER_REMOTE_DIR } else { '.overseer' }
+  $archive = Join-Path ([IO.Path]::GetTempPath()) ("overseer-$PID-$([Guid]::NewGuid().ToString('N')).tar")
+  try {
+    & $tar.Source -C (Split-Path -Parent $script:ScriptDir) -cf $archive scripts
+    if ($LASTEXITCODE -ne 0) { Fail "tar.exe failed while packaging $script:ScriptDir (exit $LASTEXITCODE)" }
+    $remote = 'mkdir -p "$HOME/' + $dest + '" && tar -C "$HOME/' + $dest + '" -xf - && chmod +x "$HOME/' + $dest + '/scripts/overseer"'
+    Invoke-OverseerSsh -HostName $hostName -RemoteCommand $remote -InputPath $archive
+    if ($script:LastSshExitCode -ne 0) { $script:CommandExitCode = $script:LastSshExitCode; return }
+    "overseer: deployed scripts to ${hostName}:~/$dest/"
+  } finally {
+    Remove-Item -LiteralPath $archive -Force -ErrorAction SilentlyContinue
+  }
+}
+
+function Ensure-RemoteDeployed([string]$HostName, [string]$RemoteBin) {
+  Invoke-OverseerSsh -HostName $HostName -RemoteCommand "[ -f `"$RemoteBin`" ]" -Quiet
+  if ($script:LastSshExitCode -eq 0) { return }
+  [Console]::Error.WriteLine("overseer: $HostName has no overseer yet — deploying it once...")
+  $script:CommandExitCode = 0
+  try { Invoke-Deploy @($HostName) | ForEach-Object { [Console]::Error.WriteLine([string]$_) } }
+  catch { Fail "auto-deploy to $HostName failed — deploy it manually (overseer deploy $HostName), or set OVERSEER_NO_AUTODEPLOY=1 to skip this" }
+  if ($script:CommandExitCode -ne 0) {
+    Fail "auto-deploy to $HostName failed — deploy it manually (overseer deploy $HostName), or set OVERSEER_NO_AUTODEPLOY=1 to skip this"
+  }
+}
+
+function Invoke-On([string[]]$Values) {
+  $hostName = $Values[0]
+  if (-not $hostName -or $Values.Count -lt 2) {
+    Fail "usage: overseer.ps1 on <host> <command> [args]"
+  }
+  Assert-SshAvailable
+  $remoteBin = if ($env:OVERSEER_REMOTE_BIN) { $env:OVERSEER_REMOTE_BIN } else { '$HOME/.overseer/scripts/overseer' }
+  if (-not $env:OVERSEER_REMOTE_BIN -and -not $env:OVERSEER_NO_AUTODEPLOY) {
+    Ensure-RemoteDeployed -HostName $hostName -RemoteBin $remoteBin
+  }
+  $quotedParts = @($Values | Select-Object -Skip 1 | ForEach-Object { ConvertTo-PosixSingleQuoted -Value ([string]$_) })
+  $quoted = $quotedParts -join ' '
+  $remote = "OVS_VIA_ON=1 $remoteBin $quoted"
+  Invoke-OverseerSsh -HostName $hostName -RemoteCommand $remote
+  $script:CommandExitCode = $script:LastSshExitCode
+}
+
 function Invoke-Start([string[]]$Values) {
   $target = $Values[0]; if (-not $target) { Fail 'usage: overseer.ps1 start <name> [pwsh|claude|codex] [workdir]' }
   $which = if ($Values.Count -gt 1) { $Values[1] } else { 'pwsh' }
@@ -529,7 +646,7 @@ function Write-Help {
   @'
 usage: overseer.ps1 <command> [args]
 
-Native Windows controller (no Linux, WSL, tmux, SSH, or Administrator required):
+Native Windows controller (local workers need no Linux, WSL, tmux, SSH, or Administrator):
   start <name> [pwsh|claude|codex] [workdir]  create a visible local worker console
   list                                           list local overseer workers
   peek <name>                                    read the worker screen
@@ -545,6 +662,8 @@ Native Windows controller (no Linux, WSL, tmux, SSH, or Administrator required):
   quit <name>                                    exit the agent TUI
   stop <name>                                    destroy the broker and its child
   doctor [--live]                                check the native Windows path
+  on <host> <command> [args]                     run overseer on a Linux host over SSH
+  deploy <host>                                  copy the bundled scripts to a Linux host
 
 Only sessions created by `start` are drivable. Existing arbitrary console windows cannot be attached.
 '@
@@ -571,10 +690,13 @@ function Invoke-Main {
     'slash' { Invoke-Slash $Rest }
     'menu' { Invoke-Menu $Rest }
     'doctor' { Invoke-Doctor $Rest }
+    'on' { Invoke-On $Rest }
+    'deploy' { Invoke-Deploy $Rest }
     default { Fail "unknown command '$Command'" }
   }
 }
 
 if ($MyInvocation.InvocationName -ne '.') {
   try { Invoke-Main } catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }
+  if ($script:CommandExitCode -ne 0) { exit $script:CommandExitCode }
 }
