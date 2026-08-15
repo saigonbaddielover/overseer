@@ -8,6 +8,8 @@
   `discovery.sh` (pane → harness → transcript path), `transcript.sh` (Claude + Codex readers, turn-done),
   `tui.sh` (screen read + keyboard/paste delivery), `commands.sh` (the local + ssh `cmd_*` surface),
   `windows.sh` (the `win*` surface: broker payload transfer, pipe client, remote turn wait).
+- `skills/overseer/scripts/overseer.ps1` — the native Windows controller. It drives local visible
+  brokers without SSH and carries PowerShell equivalents of the transcript/turn orchestration seam.
 - `skills/overseer/scripts/win-*.ps1` — the PowerShell payloads copied to a Windows host on demand;
   see [docs/WINDOWS.md](docs/WINDOWS.md) for the mechanism and its non-obvious constraints.
 - `.claude-plugin/marketplace.json` and `.agents/plugins/marketplace.json` — the Claude Code and Codex
@@ -52,6 +54,7 @@ bash tests/run.sh                                  # parser fixture tests (no tm
 bash tests/win-flow.sh                             # win* orchestration, mocked ssh
 bash tests/win-payloads.sh                         # the same two .ps1 files CI's windows job runs (needs pwsh)
 plugins/overseer/skills/overseer/scripts/overseer doctor --live   # runtime preflight + throwaway-pane round trip
+pwsh plugins/overseer/skills/overseer/scripts/overseer.ps1 doctor --live  # native Windows broker round trip
 ```
 
 ## Tests
@@ -162,8 +165,9 @@ The existing comments in `scripts/lib/*.sh` explain non-obvious tmux / TUI gotch
 verbatim** when you touch the surrounding logic. The project convention is otherwise *no prose
 comments*: write self-documenting code and put new rationale in the commit, the PR, or `docs/`.
 Functional comments (shebangs, `# shellcheck …` directives, license headers) are the exception.
-Target a Linux controller with tmux + jq; keep it POSIX-ish bash. The `win-*.ps1` payloads follow the
-same rule — their rationale lives in [docs/WINDOWS.md](docs/WINDOWS.md).
+Keep the Linux controller POSIX-ish Bash targeting tmux + jq. Keep the native Windows controller and
+`win-*.ps1` payloads PowerShell 7-compatible; their rationale lives in
+[docs/WINDOWS.md](docs/WINDOWS.md).
 
 ## Adding an agent harness
 

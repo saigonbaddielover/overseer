@@ -1,16 +1,14 @@
 ---
 name: overseer
-description: Read or drive ANOTHER live agent process from outside it — a running Claude Code or Codex session, or a plain shell — in a local or remote Linux tmux pane, or in a console window on a remote WINDOWS machine over SSH. Use when the user wants to see the latest conversation of a claude or codex they are watching, send a message / reply on their behalf to it, run a command turn-based in a shell they are watching, list which tmux panes are running what agent, create or tear down a Linux tmux session running a shell/claude/codex (start/stop), or start/drive/stop a claude, codex or pwsh on a Windows PC's visible desktop (win HOST start/chat/sh/read/stop). read/chat/send/wait/list auto-detect the harness (Claude Code or Codex). Overseer itself runs on a Linux controller; its targets are Linux tmux panes (local or over ssh) and remote native Windows console brokers. Local pane discovery is Linux + tmux only; a plain non-tmux Linux terminal cannot be driven.
+description: Read or drive ANOTHER live agent process from outside it — Claude Code, Codex, or a shell — from a native Windows controller or in a local/remote Linux tmux pane. Use when the user wants to create, list, read, message, wait for, interrupt, or stop visible agent workers. On Windows, overseer creates and drives local named-pipe broker consoles with PowerShell and needs no Linux, WSL, tmux, SSH, or Administrator access. On Linux it discovers and drives tmux panes locally or over SSH and can drive remote Windows desktops with win HOST verbs. read/chat/send/wait/list auto-detect Claude Code or Codex.
 ---
 
-# overseer — read and drive a live tmux pane (Claude Code, Codex, or a plain shell)
+# overseer — read and drive live Claude Code, Codex, and shell workers
 
-A running agent TUI (Claude Code, Codex) cannot be talked to programmatically — the only
-input channel is the keyboard. This skill wraps a deterministic, self-verifying
-`tmux send-keys` / `capture-pane` procedure plus transcript reading, so you can read and
-drive another agent session — or run commands turn-based in a plain shell — that the user
-is watching in a tmux pane. It works the same whether the pane is on this box or displayed on
-the user's machine over VSCode Remote-SSH, because tmux is server-side here.
+A running agent TUI has no stable control API — its input channel is the keyboard. On Linux this skill
+wraps a self-verifying `tmux send-keys` / `capture-pane` procedure. On Windows it uses a visible local
+console broker and an authenticated named pipe. Both paths pair the screen with the agent transcript,
+so a controller can drive another session turn-by-turn and return the reply belonging to its prompt.
 
 **Harnesses.** `list`, `read`, `chat`, `send`, `wait`, `quit`, `slash`, `fleet` **auto-detect** whether a
 pane runs Claude Code or Codex and adapt (right transcript, right completion signal, right exit keys), so
@@ -22,8 +20,22 @@ Ctrl-C, which would quit Codex when it is idle; a Codex **approval prompt** is a
 key via `keys` (`y` approve once, `a` approve for session, `d` deny). Support for more harnesses is
 added behind these same commands.
 
-All work goes through one bundled script. Resolve its **absolute** path first — never derive it from
-the workspace CWD — then call it. In **Claude Code** the plugin root is already in the environment:
+All work goes through one bundled OS-specific entry point. Resolve its **absolute** path first — never
+derive it from the workspace CWD. On **native Windows**, take this skill directory from the catalog and
+run its PowerShell entry point:
+
+```powershell
+$OverseerBin = '<skill-directory>\scripts\overseer.ps1'
+& $OverseerBin <command> [args]
+```
+
+Windows commands target a worker name created by `start`: `start <name> [pwsh|claude|codex]
+[workdir]`, then `list`, `peek <name>`, `read <name>`, `send <name> --yes <message>`, `chat <name>
+--yes <message> [timeout]`, `wait`, `keys`, `interrupt`, `slash`, `menu`, `quit`, or `stop`. Only workers
+created by this entry point are drivable; do not claim it can attach to an arbitrary existing console.
+Sending is still a side effect and requires the user's explicit request.
+
+On **Linux**, use the Bash entry point. In Claude Code the plugin root is already in the environment:
 
 ```
 OVERSEER_BIN="${CLAUDE_PLUGIN_ROOT}/skills/overseer/scripts/overseer"
@@ -33,10 +45,11 @@ bash "$OVERSEER_BIN" <command> [args]
 In **Codex** no such variable exists: your skills catalog lists this skill with the absolute path of
 this very `SKILL.md`; take the directory that file sits in and set
 `OVERSEER_BIN="<that directory>/scripts/overseer"`.
-Either way the shell does not carry state between tool calls, so **repeat the assignment in every
+The shell does not carry state between tool calls, so **repeat the assignment in every
 command** that uses it — an unset `OVERSEER_BIN` runs `bash ""` and fails.
 
-`<target>` is either a tmux pane id (`%3`) or a session/window name (**its active pane** — so every
+The command table below describes the **Linux Bash entry point**. `<target>` is either a tmux pane id
+(`%3`) or a session/window name (**its active pane** — so every
 command acts on the same one pane; in a split window, target a background claude pane by its `%N`).
 `<message>` may be a literal string or `-`, which reads the whole message (a long, multi-line prompt)
 from stdin.
@@ -156,14 +169,17 @@ command of the same name.
 
 ## Scope: what runs where
 
-overseer is a **Linux controller** and drives two kinds of target:
+overseer has two controller modes and three target shapes:
 
-- **Linux tmux panes** — local, or on another Linux host over ssh (`deploy` + `on`, which runs the
+- **Native Windows controller** — `overseer.ps1` starts and drives named local broker workers on the
+  current desktop. It needs PowerShell 7 only and cannot attach to arbitrary pre-existing consoles.
+
+- **Linux controller → tmux panes** — local, or on another Linux host over ssh (`deploy` + `on`, which runs the
   whole program remote-side). tmux is client/server, so a pane attached from a VSCode Remote-SSH
   terminal is driven server-side and the user still sees it live. overseer both drives panes someone
   else opened and, with `start`/`stop`, creates and destroys its own **detached** sessions running a
   shell/claude/codex (the user runs `tmux attach -t <name>` to watch one) — the same local or via `on`.
-- **Remote native Windows consoles** over plain ssh — the `win <host> <verb>` commands, which drive a
+- **Linux controller → remote native Windows consoles** over plain ssh — the `win <host> <verb>` commands, which drive a
   PowerShell **broker** on the host's visible desktop. No tmux, no WSL, and overseer itself never runs there.
 
 A **plain, non-tmux Linux terminal cannot be driven**: the kernel blocks keystroke injection into a
@@ -210,8 +226,8 @@ overseer on sandbox sh %3 'git pull'          # or drive a remote shell pane
   sudo; `--dry-run` to preview), then re-survey; `DRIVE=win*` → drive it with `win <host> <verb>` (admin +
   console user + [WINDOWS.md](https://github.com/saigonbaddielover/sgbl-overseer/blob/main/docs/WINDOWS.md) prereqs). `provision` does Linux base deps only — agents
   and Windows prereqs are manual.
-- The `on`/`deploy` path is **Linux-only** (overseer itself needs `/proc` + tmux, so it can't run on a
-  Windows host). A **Windows** machine in the tailnet is a first-class target through the `win <host>
+- The `on`/`deploy` path belongs to the **Linux Bash controller** (the remote copy needs `/proc` + tmux)
+  and is not exposed by the native Windows entry point. A **Windows** machine in the tailnet is a first-class target through the `win <host>
   <verb>` commands instead: overseer runs locally and only ssh-executes PowerShell payloads there. The
   full lifecycle is start → drive → stop:
 

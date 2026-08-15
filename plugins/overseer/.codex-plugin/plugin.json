@@ -1,7 +1,7 @@
 {
   "name": "overseer",
-  "version": "0.54.0",
-  "description": "Drive and read other Claude Code, Codex, and shell sessions in Linux tmux panes or remote Windows consoles.",
+  "version": "0.55.0",
+  "description": "Drive and read other Claude Code, Codex, and shell sessions from native Windows consoles or Linux tmux panes.",
   "author": {
     "name": "saigonbaddielover",
     "url": "https://github.com/saigonbaddielover"
@@ -22,7 +22,7 @@
   "interface": {
     "displayName": "overseer",
     "shortDescription": "Drive and read live coding-agent sessions",
-    "longDescription": "Read, message, wait for, and manage Claude Code, Codex, and shell sessions in local or remote Linux tmux panes and native Windows consoles over SSH.",
+    "longDescription": "Read, message, wait for, and manage Claude Code, Codex, and shell workers locally on native Windows or in local and remote Linux tmux panes.",
     "developerName": "saigonbaddielover",
     "category": "Developer Tools",
     "capabilities": [

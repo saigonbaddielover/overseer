@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Read and drive another agent session (Claude Code or Codex) from outside it: a local or remote Linux
 # tmux pane, or a console window on a remote Windows host over ssh (the win* commands).
-# The controller is Linux-only (uses /proc). Requires: tmux, jq; ssh/scp for remote targets.
+# This Bash controller is Linux-only (uses /proc). Requires: tmux, jq; ssh/scp for remote targets.
 # Run OUTSIDE the target pane's tmux client.
 set -eu
 

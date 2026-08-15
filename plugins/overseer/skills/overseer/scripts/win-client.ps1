@@ -5,14 +5,16 @@ param(
   [string]$Name = '',
   [string]$T1 = '',
   [string]$T2 = '',
-  [int]$TimeoutSec = 30
+  [int]$TimeoutSec = 30,
+  [string]$Root = ''
 )
 $ErrorActionPreference = 'Stop'
 try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
 
 function Get-ConfigPath($broker) {
   if ($broker -notmatch '^overseer-broker(?:-[0-9A-Za-z_-]+)?\z') { throw "invalid broker '$broker'" }
-  return (Join-Path (Join-Path $env:ProgramData 'overseer\brokers') "$broker.json")
+  $base = if ($Root) { $Root } else { Join-Path $env:ProgramData 'overseer' }
+  return (Join-Path (Join-Path $base 'brokers') "$broker.json")
 }
 function Get-Config($broker) {
   $path = Get-ConfigPath $broker
@@ -57,7 +59,8 @@ function Label($broker) {
   return ($broker -replace '^overseer-broker-', '')
 }
 function Invoke-List {
-  $dir = Join-Path $env:ProgramData 'overseer\brokers'
+  $base = if ($Root) { $Root } else { Join-Path $env:ProgramData 'overseer' }
+  $dir = Join-Path $base 'brokers'
   if (-not (Test-Path -LiteralPath $dir)) { 'none'; return }
   $files = @(Get-ChildItem -LiteralPath $dir -Filter 'overseer-broker*.json' -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -notmatch '\.state\.json\z' } | Sort-Object Name)
   if (-not $files) { 'none'; return }

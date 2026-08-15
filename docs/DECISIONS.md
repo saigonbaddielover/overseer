@@ -609,3 +609,32 @@ caller could have wanted, so a fast, explanatory refusal is strictly better than
 **One consequence.** `send --notify`'s bespoke "would wake the pane it is dispatching to" check became
 unreachable — the general guard fires first and says the same thing — so it was deleted rather than left
 as dead code that looks live.
+
+## ADR-0013 — Native Windows uses local brokers, not a tmux emulation layer
+
+**Status:** Accepted (2026-08-15).
+
+**Context.** The original controller was Linux-only because pane discovery and input are properties of
+tmux plus `/proc`. Windows Terminal and conhost expose no equivalent server-owned pane vocabulary: a
+process can enumerate terminal processes, but it cannot safely recover an arbitrary tab's rendered
+buffer and keyboard channel. Requiring WSL would technically run the existing controller, but would not
+make overseer native and still would not create a tmux-style bridge into Windows consoles.
+
+**Decision.** Ship `scripts/overseer.ps1` as a native local controller and reuse the Windows broker
+protocol. `start` creates a visible broker/child console in the current interactive session; subsequent
+commands address it by name through an authenticated named pipe. The local descriptor root is the
+current user's `%LOCALAPPDATA%\overseer`, while the remote SSH path retains `%ProgramData%` and its
+cross-account ACLs. The local launcher needs neither elevation nor the Session-0-to-1 scheduled-task
+bridge because it already runs in Session 1.
+
+The supported boundary is explicit: native Windows can drive workers it created, not attach to an
+arbitrary existing terminal. Its initial command surface covers the single-worker lifecycle and
+turn-based operations; Linux-only fleet discovery, SSH provisioning, quota reporting, peer addressing,
+queued-message retraction, and notification watchers remain on the Bash controller until they gain
+native implementations with equivalent guards.
+
+**Consequences.** The broker, client, transcript contract, and Win32 console code remain shared rather
+than forking into a second transport. PowerShell owns a small native transcript reader because live
+JSONL files must be opened with `FileShare.ReadWrite|Delete`; shelling through WSL or requiring `jq`
+would defeat the native/no-extra-runtime goal. Parser fixtures and a real `doctor --live` broker
+round-trip gate this path, and release verification should exercise one real Claude or Codex turn.

@@ -44,6 +44,12 @@ The rules it holds to:
 
 ## Windows targets (the `win <host> <verb>` commands)
 
+The native Windows controller (`overseer.ps1`) uses the same authenticated named-pipe protocol but does
+not cross accounts or desktop sessions. It launches visible workers directly as the current user and
+stores descriptors under that user's `%LOCALAPPDATA%\overseer`; no Administrator token or scheduled
+task is involved. Its `chat`, `keys`, `sh`, `interrupt`, and `stop` commands still act on real local
+processes and require the same explicit user authorization as their remote counterparts.
+
 These are remote execution on somebody's live desktop and deserve the same care as `sh`:
 
 - `win <host> start` spawns a **visible** process in the console user's session; `win <host> keys`, `sh`

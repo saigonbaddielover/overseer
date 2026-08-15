@@ -2,7 +2,9 @@ param(
   [string]$Broker = 'overseer-broker',
   [string]$Which = 'pwsh',
   [string]$WorkDirB64 = '',
-  [string]$CmdB64 = ''
+  [string]$CmdB64 = '',
+  [string]$Root = '',
+  [switch]$Local
 )
 $ErrorActionPreference = 'Stop'
 
@@ -62,20 +64,22 @@ switch ($Which) {
   default  { "ERR unknown child '$Which' (use pwsh|claude|codex)"; exit 2 }
 }
 
-$root = Join-Path $env:ProgramData 'overseer'
+$root = if ($Root) { $Root } else { Join-Path $env:ProgramData 'overseer' }
 $payloadDir = Join-Path $root 'payloads'
 $brokerDir = Join-Path $root 'brokers'
-$cu = (Get-CimInstance Win32_ComputerSystem).UserName
+$cu = if ($Local) { [Security.Principal.WindowsIdentity]::GetCurrent().Name } else { (Get-CimInstance Win32_ComputerSystem).UserName }
 if (-not $cu) { 'ERR no interactive console user (screen locked or logged off)'; exit 2 }
 New-Item -ItemType Directory -Force -Path $root, $payloadDir, $brokerDir | Out-Null
-Set-SharedAcl $root $cu
-Set-SharedAcl $payloadDir $cu
-Set-SharedAcl $brokerDir $cu
+if (-not $Local) {
+  Set-SharedAcl $root $cu
+  Set-SharedAcl $payloadDir $cu
+  Set-SharedAcl $brokerDir $cu
+}
 $brk = Join-Path $payloadDir 'overseer-win-broker.ps1'
 if (-not (Test-Path -LiteralPath $brk)) { "ERR broker payload not found at $brk"; exit 2 }
 foreach ($pf in @('overseer-win-broker.ps1', 'overseer-win-client.ps1', 'overseer-win-launch.ps1')) {
   $pfp = Join-Path $payloadDir $pf
-  if (Test-Path -LiteralPath $pfp) { Set-FileAcl $pfp $cu 'ReadAndExecute' }
+  if ((-not $Local) -and (Test-Path -LiteralPath $pfp)) { Set-FileAcl $pfp $cu 'ReadAndExecute' }
 }
 $configPath = Join-Path $brokerDir "$Broker.json"
 $statePath = Join-Path $brokerDir "$Broker.state.json"
@@ -103,23 +107,27 @@ $config = [ordered]@{
   CreatedAt = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
 }
 New-Item -ItemType File -Force -Path $configPath | Out-Null
-Set-FileAcl $configPath $cu 'ReadAndExecute'
+if (-not $Local) { Set-FileAcl $configPath $cu 'ReadAndExecute' }
 $config | ConvertTo-Json -Compress | Set-Content -LiteralPath $configPath -Encoding UTF8
 New-Item -ItemType File -Force -Path $statePath | Out-Null
-Set-FileAcl $statePath $cu 'Modify'
+if (-not $Local) { Set-FileAcl $statePath $cu 'Modify' }
 '{}' | Set-Content -LiteralPath $statePath -Encoding UTF8
 
 $argline = "-NoProfile -ExecutionPolicy Bypass -File `"$brk`" -Config `"$configPath`""
-$act = New-ScheduledTaskAction -Execute 'pwsh.exe' -Argument $argline
-$set = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero)
-$prin = New-ScheduledTaskPrincipal -UserId $cu -LogonType Interactive -RunLevel Limited
-$task = $Broker
-try {
-  Register-ScheduledTask -TaskName $task -Action $act -Settings $set -Principal $prin -Force | Out-Null
-  Start-ScheduledTask -TaskName $task
-} finally {
-  Start-Sleep -Milliseconds 1500
-  Unregister-ScheduledTask -TaskName $task -Confirm:$false -ErrorAction SilentlyContinue
+if ($Local) {
+  Start-Process -FilePath 'pwsh.exe' -ArgumentList $argline -WorkingDirectory $root -WindowStyle Normal | Out-Null
+} else {
+  $act = New-ScheduledTaskAction -Execute 'pwsh.exe' -Argument $argline
+  $set = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero)
+  $prin = New-ScheduledTaskPrincipal -UserId $cu -LogonType Interactive -RunLevel Limited
+  $task = $Broker
+  try {
+    Register-ScheduledTask -TaskName $task -Action $act -Settings $set -Principal $prin -Force | Out-Null
+    Start-ScheduledTask -TaskName $task
+  } finally {
+    Start-Sleep -Milliseconds 1500
+    Unregister-ScheduledTask -TaskName $task -Confirm:$false -ErrorAction SilentlyContinue
+  }
 }
 
 $ok = $false

@@ -5,6 +5,23 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.55.0] - 2026-08-15
+
+### Added
+
+- **Native Windows controller.** `scripts/overseer.ps1` creates and drives visible local PowerShell,
+  Claude Code, and Codex workers without Linux, WSL, tmux, SSH, or Administrator access. It exposes
+  the local `start`/`list`/`peek`/`keys`/`sh`/`read`/`send`/`chat`/`wait`/`interrupt`/`slash`/`menu`/
+  `quit`/`stop`/`doctor` loop through the same authenticated named-pipe broker used by remote Windows.
+- The Windows transcript reader opens live Claude/Codex JSONL files with
+  `FileShare.ReadWrite|Delete`, so it can safely tail a rollout while the agent is writing it.
+
+### Changed
+
+- The Windows broker launcher and client accept an alternate broker root. Remote SSH controllers keep
+  the hardened `%ProgramData%` layout; a native controller uses the current user's
+  `%LOCALAPPDATA%\overseer` and launches directly in the already-interactive desktop session.
+
 ## [0.54.0] - 2026-08-14
 
 ### Added
