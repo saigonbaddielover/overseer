@@ -10,8 +10,8 @@
       "name": "overseer",
       "source": "./plugins/overseer",
       "category": "development",
-      "description": "One agent that oversees others: drive/read other agent sessions (Claude Code, Codex) and shells, turn-based — in Linux tmux panes and in native Windows consoles over ssh. Linux controller.",
-      "version": "0.54.0",
+      "description": "One agent that oversees others: drive/read Claude Code, Codex, and shell workers from native Windows consoles or Linux tmux panes.",
+      "version": "0.55.0",
       "license": "MIT",
       "keywords": [
         "tmux",

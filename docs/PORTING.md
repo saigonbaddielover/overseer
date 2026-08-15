@@ -1,6 +1,8 @@
-# Porting overseer beyond Linux
+# Porting the tmux controller beyond Linux
 
-overseer is **Linux-only at runtime today.** Discovery reads `/proc`, and a few helpers use GNU
+overseer's **tmux controller** is Linux-only. A separate native Windows controller is implemented by
+`scripts/overseer.ps1` using visible console brokers; it does not provide tmux-style discovery of
+arbitrary existing terminals. Discovery of tmux panes still reads `/proc`, and a few helpers use GNU
 coreutils flags. This document is the exact specification for a macOS (or other Unix) backend, so a
 port is a well-scoped, testable task rather than a rewrite. Nothing here is wired up — a contributor
 on a Mac implements and *live-verifies* it (the project's core rule: verification is live).

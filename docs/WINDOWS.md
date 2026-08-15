@@ -1,8 +1,28 @@
-# Driving a remote Windows host
+# Driving Windows workers
 
-overseer runs on Linux only. Windows is reached as a **remote target over plain SSH** — no WSL, no
-agent installed on the Windows box beyond three PowerShell files staged under `%ProgramData%\overseer`
-on demand.
+## Native Windows controller
+
+Windows can also be the controller. The bundled `scripts/overseer.ps1` starts and drives visible local
+workers directly from PowerShell 7:
+
+```powershell
+& <skill-dir>\scripts\overseer.ps1 doctor --live
+& <skill-dir>\scripts\overseer.ps1 start worker codex C:\work\project
+& <skill-dir>\scripts\overseer.ps1 chat worker --yes 'Review the current change' 600
+```
+
+This local path needs no SSH, WSL, tmux, scheduled task, or Administrator access. Its descriptors are
+user-private under `%LOCALAPPDATA%\overseer`; the broker is launched directly because the controller is
+already in the interactive desktop session. It reuses the same named-pipe protocol and Win32 console
+I/O described below. It can drive only workers it created—attaching to an arbitrary existing Windows
+Terminal tab is not supported.
+
+The remainder of this document describes the remote `Linux → SSH → Windows` path. That path still uses
+`%ProgramData%`, an administrator SSH login, and an interactive scheduled task to cross Session 0 → 1.
+
+In remote mode, Windows is reached from a Linux controller over plain SSH — no WSL and no agent
+installed on the Windows box beyond three PowerShell files staged under `%ProgramData%\overseer` on
+demand.
 
 This document records *why* the Windows path looks the way it does. The scripts carry no prose
 comments by project rule, and every fact below cost a live debugging round to establish — several of

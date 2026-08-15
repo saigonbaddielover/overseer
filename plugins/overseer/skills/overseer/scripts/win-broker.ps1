@@ -67,7 +67,7 @@ function Stop-Descendants($root) {
 
 function Get-ClaimedTranscripts {
   $out = New-Object System.Collections.Generic.List[string]
-  $dir = Join-Path $env:ProgramData 'overseer\brokers'
+  $dir = Split-Path -Parent $StatePath
   foreach ($f in (Get-ChildItem -LiteralPath $dir -Filter '*.state.json' -File -ErrorAction SilentlyContinue)) {
     if ($f.FullName -eq $StatePath) { continue }
     try {

@@ -4,11 +4,13 @@
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 **One agent that oversees others.** Drive and read other agent sessions — and plain shells —
-turn-based, from outside them: in **Linux tmux panes** (local or over ssh) and in **native Windows
-console windows** on a remote machine's visible desktop. Packaged as an installable plugin for
+turn-based, from outside them: in **native Windows console windows** or **Linux tmux panes** (local or
+over ssh). Packaged as an installable plugin for
 **Claude Code and [Codex](https://developers.openai.com/codex/build-plugins)**.
 
-On Linux, overseer both **drives sessions someone else started** and **starts/stops its own**: `list`
+On Windows, overseer starts and drives visible local worker consoles through native PowerShell and an
+authenticated named pipe — no Linux, WSL, tmux, SSH, or Administrator access required. On Linux it both
+**drives sessions someone else started** and **starts/stops its own**: `list`
 discovers a tmux pane already running Claude Code, Codex or a shell and reads/drives it turn-based, while
 `start` opens a fresh **detached** tmux session running a shell or agent and `stop` tears one down. (On a
 Windows host — which has no tmux pane to find — `win <host> start`/`win <host> stop` are the equivalent
@@ -16,11 +18,9 @@ pair.) Today it
 speaks **Claude Code** and **Codex** (plus any shell); `read`/`chat`/`send`/`wait`/`list` auto-detect
 which harness a pane runs. It's built so more harnesses can be added behind the same commands.
 
-A running agent TUI has no API — its only input channel is the keyboard. `overseer` wraps a
-deterministic, self-verifying `tmux send-keys` / `capture-pane` procedure (plus transcript reading) so
-an agent can read and drive another session the user is watching. Because tmux is client/server, it
-works the same whether the pane is local or displayed over VSCode Remote-SSH — the driving happens
-server-side.
+A running agent TUI has no stable control API — its input channel is the keyboard. Overseer combines
+verified keyboard/screen operations with transcript reading: `tmux send-keys`/`capture-pane` on Linux,
+or a visible console broker using Win32 console I/O on Windows.
 
 > [!WARNING]
 > **This executes actions in other sessions.** Target Claude sessions usually run with
@@ -32,13 +32,16 @@ server-side.
 
 | | |
 |---|---|
-| **Controller** (where overseer runs) | **Linux** only — pane discovery reads `/proc`. Needs `tmux`, `jq`, `bash ≥ 4.1`, plus `ssh`/`scp` for any remote target. |
-| **Targets** | **Linux tmux panes**, local or on another Linux host over ssh (`deploy` + `on`); **remote native Windows consoles** over plain ssh (the `win <host> <verb>` commands, via a PowerShell broker on the visible desktop — no tmux and no WSL there). |
-| **Not supported** | A macOS controller (specced in [docs/PORTING.md](docs/PORTING.md), unbuilt); local pane discovery anywhere but Linux + tmux; a plain non-tmux Linux terminal as a target. |
+| **Controller** (where overseer runs) | **Windows:** native PowerShell 7, local broker workers. **Linux:** tmux + `/proc`, with SSH fleet support. |
+| **Targets** | Local Windows workers created by overseer; Linux tmux panes locally or over SSH; remote Windows consoles from a Linux controller. |
+| **Not supported** | Attaching to an arbitrary existing Windows console; a macOS controller (specced in [docs/PORTING.md](docs/PORTING.md), unbuilt); a plain non-tmux Linux terminal. |
 
 ## Requirements
 
-- **Linux** controller — agent discovery reads `/proc` (a macOS `ps`/`lsof` backend sits behind a
+- **Windows controller:** Windows 10/11 or Server with **PowerShell 7** (`pwsh`) and the Claude/Codex
+  CLIs for the worker kinds being started. Local brokers live under `%LOCALAPPDATA%\overseer` and do
+  not require elevation.
+- **Linux controller:** agent discovery reads `/proc` (a macOS `ps`/`lsof` backend sits behind a
   small OS seam and is fully specced in [docs/PORTING.md](docs/PORTING.md), unbuilt).
 - **tmux** — a Linux target must run inside tmux (a plain PTY can't be driven; the kernel blocks
   keystroke injection and the screen buffer lives client-side). Windows targets use the broker
@@ -101,6 +104,29 @@ codex plugin add overseer@sgbl
 Open a new Codex thread after updating.
 
 ## Commands
+
+### Native Windows controller
+
+Use the bundled PowerShell entry point. It manages visible local workers by name:
+
+```powershell
+$ov = '<installed-skill-directory>\scripts\overseer.ps1'
+& $ov doctor --live
+& $ov start worker codex D:\work\project
+& $ov chat worker --yes 'Inspect the failing tests and report the cause' 600
+& $ov read worker
+& $ov stop worker
+```
+
+The native command set is `start`, `list`, `peek`, `keys`, `sh`, `read`, `send`, `chat`, `wait`,
+`interrupt`, `slash`, `menu`, `quit`, `stop`, and `doctor`. It intentionally drives only consoles it
+created: unlike tmux, Windows has no server-owned pane that can safely expose the screen buffer of an
+arbitrary existing terminal. `--yes` skips the human confirmation after the prompt is visibly verified;
+agents should use it only after the user explicitly authorized that dispatch.
+`OVERSEER_TIMEOUT`, `OVERSEER_POLL_INTERVAL`, `OVERSEER_WIN_CLAUDE`, and `OVERSEER_WIN_CODEX` have the
+same meaning as on the Bash path; `OVERSEER_WINDOWS_HOME` overrides the local broker root.
+
+### Linux controller
 
 All work goes through the bundled `skills/overseer/scripts/overseer` script, called by its absolute
 path: Claude Code has the plugin root in the environment, so the agent runs
@@ -279,6 +305,13 @@ by hand (agents vary too much per host to script safely).
 
 ## How it works
 
+- **Native Windows:** `overseer.ps1 start` opens a visible broker console in the current interactive
+  desktop and keeps its descriptor/token under `%LOCALAPPDATA%\overseer`. The controller talks over an
+  ACL-protected named pipe, reads the rendered console grid with Win32 APIs, and tails the local agent
+  transcript with file sharing enabled while Claude/Codex is still writing it. No scheduled task or
+  Administrator token is involved. The remote `win <host>` path keeps its separate hardened
+  `%ProgramData%` + scheduled-task design because SSH lands outside the interactive desktop.
+
 - **Delivery** is one atomic **bracketed paste**, verified before submit — uniform for one line, many
   lines, or a line wider than the pane, and a ghost autocomplete can never interleave. A Claude message
   whose first char is `/ ! # @` gets one leading space (Claude trims it back off) so it stays literal;
@@ -322,8 +355,9 @@ turn started with no sub-second race), and `Notification` touches `awaiting/<ses
 surface a permission/menu prompt the moment it appears). They are wired **automatically** on install — no
 `settings.json` editing. Every signal is only an accelerator: the transcript stays the source of truth
 (an answer is never read half-written) and the on-screen prompt stays the arbiter for awaiting, so a
-session the hooks do not cover — or a Codex pane, which has none — just falls back to polling, never
-worse. The fast path assumes the driven Claude session shares overseer's `~/.claude` (`CLAUDE_HOME`);
+session the hooks do not cover just falls back to polling, never worse. The native PowerShell
+controller always tails the local transcript and does not require the markers. The fast path assumes
+the driven Claude session shares overseer's `~/.claude` (`CLAUDE_HOME`);
 one running as another user, under a custom `CLAUDE_HOME`, or started before the plugin was installed
 simply polls (~2s slower), never blocked.
 
@@ -400,12 +434,14 @@ Codex needs none of this: it writes `rate_limits` into every rollout already.
 
 ## Caveats
 
-- **The controller is Linux only** (`/proc`), and so is direct pane discovery. Remote Windows consoles
-  are drivable as *targets* (`win <host> <verb>`), but overseer never runs on Windows.
+- **Windows cannot attach to arbitrary consoles.** A native Windows controller drives only visible
+  broker workers it created with `overseer.ps1 start`. Linux tmux discovery can attach to existing panes
+  because tmux owns their screen and input; Windows Terminal/conhost exposes no equivalent pane server.
 - **Depends on each agent's internal on-disk layout** — Claude (`~/.claude/sessions/*.json`,
   `~/.claude/projects/*/*.jsonl`) and Codex (`~/.codex/sessions/**/rollout-*.jsonl`) — undocumented and
   may change between releases. If a release breaks discovery, open an issue.
-- The target program must run **inside tmux**.
+- A Linux target program must run **inside tmux**. Native Windows targets must be workers created by
+  `overseer.ps1 start`.
 - **overseer never drives the pane it is running in.** `send chat keys sh slash menu wait quit stop
   unsend interrupt` all refuse `$TMUX_PANE` (compared against the *resolved* pane, so a session name
   cannot slip past), and `fleet` skips it with a printed note instead of failing on it. Read-only
@@ -466,6 +502,7 @@ Run the preflight first:
 ```
 overseer doctor        # or: bash "$CLAUDE_PLUGIN_ROOT/skills/overseer/scripts/overseer" doctor
                        # checkout: plugins/overseer/skills/overseer/scripts/overseer doctor
+overseer.ps1 doctor --live   # native Windows controller
 ```
 
 - **"no agent pane (claude/codex) for target"** → the pane isn't running Claude Code or Codex, or you
@@ -474,8 +511,9 @@ overseer doctor        # or: bash "$CLAUDE_PLUGIN_ROOT/skills/overseer/scripts/o
 - **`doctor` warns about `~/.claude/sessions/*.json`** → either no Claude session is running, or a
   Claude Code update changed its on-disk layout (which breaks discovery). Open an issue with the
   `doctor` output and your `claude --version`.
-- **Nothing gets driven** → the target must run **inside tmux** (a plain terminal can't be driven), and
-  you must run overseer from **outside** that pane's tmux client.
+- **Nothing gets driven on Linux** → the target must run **inside tmux** and overseer must run outside
+  that pane's client. **On Windows** → run `overseer.ps1 list`; only workers created by
+  `overseer.ps1 start` are discoverable.
 
 ## Uninstall
 
