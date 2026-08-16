@@ -65,6 +65,14 @@ pwsh plugins/overseer/skills/overseer/scripts/overseer.ps1 doctor --live  # nati
   POSIX-shell gate and the `start`/`stop` name/child/existing-session refusals plus the self-kill guard
   (`_ok_session_name`, `_startgate`, `_stopgate`) — and asserts command-surface parity + the doc
   contracts, so a new command or a broken guard fails CI here.
+- **`tests/fixtures/awaiting-*.txt`** — screen fixtures for the awaiting detector, which has **two**
+  implementations (`_awaiting_text` in `scripts/lib/tui.sh`, `Test-Awaiting` in `scripts/overseer.ps1`).
+  Both suites discover these fixtures by glob and derive the expected verdict from the name — a file
+  named `awaiting-none*` must be rejected, any other `awaiting-*` must be detected — so **dropping a new
+  screen recording into that directory asserts it against both parsers at once**, with no assertion to
+  write and none to forget. Both are run with the permissive `❯›>` glyph set, since that is what the
+  native controller and the remote-Windows path use; the Linux-strict `❯›` behaviour keeps its own
+  explicit assertions in `tests/run.sh`.
 - **`tests/stress.sh`** — exercises the live paths fixtures can't: multi-pane concurrency, per-pane lock
   serialization, large-rollout reader perf, mid-turn crash liveness, and the `start`/`stop` session
   lifecycle (create → drive via `sh` → destroy, plus `stop %N` killing one pane of a multi-pane session;

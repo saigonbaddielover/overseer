@@ -5,6 +5,13 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+
+- The `awaiting-*.txt` screen fixtures are now discovered by glob in both `tests/run.sh` and
+  `tests/win-contracts.ps1`, with the expected verdict derived from the fixture name, so a new
+  recording is asserted against the Bash and PowerShell awaiting detectors at the same time instead of
+  whichever one the author remembered.
+
 ## [0.57.0] - 2026-08-15
 
 ### Added
