@@ -1,12 +1,12 @@
 {
   "name": "overseer",
-  "version": "0.57.0",
+  "version": "0.57.1",
   "description": "One agent that oversees others: drive and read Claude Code, Codex, and shell sessions from native Windows consoles or Linux tmux panes, locally or over SSH.",
   "author": {
     "name": "saigonbaddielover"
   },
-  "homepage": "https://github.com/saigonbaddielover/sgbl-overseer",
-  "repository": "https://github.com/saigonbaddielover/sgbl-overseer",
+  "homepage": "https://github.com/saigonbaddielover/overseer",
+  "repository": "https://github.com/saigonbaddielover/overseer",
   "license": "MIT",
   "keywords": [
     "tmux",

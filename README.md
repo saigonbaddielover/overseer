@@ -1,6 +1,6 @@
 # overseer
 
-[![validate](https://github.com/saigonbaddielover/sgbl-overseer/actions/workflows/validate.yml/badge.svg)](https://github.com/saigonbaddielover/sgbl-overseer/actions/workflows/validate.yml)
+[![validate](https://github.com/saigonbaddielover/overseer/actions/workflows/validate.yml/badge.svg)](https://github.com/saigonbaddielover/overseer/actions/workflows/validate.yml)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 **One agent that oversees others.** Drive and read other agent sessions — and plain shells —
@@ -68,14 +68,14 @@ or a visible console broker using Win32 console I/O on Windows.
 For Claude Code, run inside Claude Code:
 
 ```
-/plugin marketplace add saigonbaddielover/sgbl-overseer
+/plugin marketplace add saigonbaddielover/overseer
 /plugin install overseer@sgbl
 ```
 
 For Codex, run in a shell:
 
 ```
-codex plugin marketplace add saigonbaddielover/sgbl-overseer
+codex plugin marketplace add saigonbaddielover/overseer
 codex plugin add overseer@sgbl
 ```
 
@@ -542,12 +542,12 @@ Codex: `codex plugin remove overseer@sgbl`.
 Clone and add as a **local marketplace**:
 
 ```
-git clone https://github.com/saigonbaddielover/sgbl-overseer
-/plugin marketplace add ./sgbl-overseer
+git clone https://github.com/saigonbaddielover/overseer
+/plugin marketplace add ./overseer
 /plugin install overseer@sgbl
 ```
 
-For Codex, use `codex plugin marketplace add ./sgbl-overseer`, then
+For Codex, use `codex plugin marketplace add ./overseer`, then
 `codex plugin add overseer@sgbl`. Open a new thread after reinstalling the plugin.
 
 Validate locally (CI can't run `claude plugin validate` — the CLI isn't on the runner):

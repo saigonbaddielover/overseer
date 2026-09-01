@@ -20,7 +20,7 @@
 Add this repo as a **local** marketplace and install from your working tree:
 
 ```
-/plugin marketplace add ./sgbl-overseer --scope local
+/plugin marketplace add ./overseer --scope local
 /plugin install overseer@sgbl --scope local
 ```
 
