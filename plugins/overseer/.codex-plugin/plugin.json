@@ -1,13 +1,13 @@
 {
   "name": "overseer",
-  "version": "0.57.0",
+  "version": "0.57.1",
   "description": "Drive and read other Claude Code, Codex, and shell sessions from native Windows consoles or Linux tmux panes.",
   "author": {
     "name": "saigonbaddielover",
     "url": "https://github.com/saigonbaddielover"
   },
-  "homepage": "https://github.com/saigonbaddielover/sgbl-overseer",
-  "repository": "https://github.com/saigonbaddielover/sgbl-overseer",
+  "homepage": "https://github.com/saigonbaddielover/overseer",
+  "repository": "https://github.com/saigonbaddielover/overseer",
   "license": "MIT",
   "keywords": [
     "tmux",
@@ -30,7 +30,7 @@
       "Read",
       "Write"
     ],
-    "websiteURL": "https://github.com/saigonbaddielover/sgbl-overseer",
+    "websiteURL": "https://github.com/saigonbaddielover/overseer",
     "defaultPrompt": [
       "List the Claude Code and Codex sessions I can reach.",
       "Read the latest reply from the agent in my other tmux pane.",

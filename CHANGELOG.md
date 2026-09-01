@@ -5,8 +5,11 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.57.1] - 2026-09-02
+
 ### Changed
 
+- Canonical repository and marketplace source links now use `saigonbaddielover/overseer` after the GitHub repository rename; plugin identity remains `overseer@sgbl`.
 - The `awaiting-*.txt` screen fixtures are now discovered by glob in both `tests/run.sh` and
   `tests/win-contracts.ps1`, with the expected verdict derived from the fixture name, so a new
   recording is asserted against the Bash and PowerShell awaiting detectors at the same time instead of
