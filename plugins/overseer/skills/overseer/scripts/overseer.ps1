@@ -56,7 +56,7 @@ function ConvertFrom-BrokerName([string]$Broker) {
 function Invoke-WithBrokerLock {
   param([string]$Target, [scriptblock]$Action)
   $safe = (ConvertTo-BrokerName $Target) -replace '[^0-9A-Za-z_-]', '_'
-  $mutex = [Threading.Mutex]::new($false, "Local\sgbl-overseer-$safe")
+  $mutex = [Threading.Mutex]::new($false, "Local\overseer-$safe")
   $held = $false
   try {
     try { $held = $mutex.WaitOne([TimeSpan]::FromSeconds(30)) } catch [Threading.AbandonedMutexException] { $held = $true }

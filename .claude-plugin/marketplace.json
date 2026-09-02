@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
-  "name": "sgbl",
+  "name": "overseer",
   "description": "Claude Code tools by saigonbaddielover — starting with overseer.",
   "owner": {
     "name": "saigonbaddielover"
@@ -11,7 +11,7 @@
       "source": "./plugins/overseer",
       "category": "development",
       "description": "One agent that oversees others: drive/read Claude Code, Codex, and shell workers from native Windows consoles or Linux tmux panes.",
-      "version": "0.57.1",
+      "version": "0.58.0",
       "license": "MIT",
       "keywords": [
         "tmux",

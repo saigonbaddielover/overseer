@@ -13,7 +13,7 @@
 - `skills/overseer/scripts/win-*.ps1` — the PowerShell payloads copied to a Windows host on demand;
   see [docs/WINDOWS.md](docs/WINDOWS.md) for the mechanism and its non-obvious constraints.
 - `.claude-plugin/marketplace.json` and `.agents/plugins/marketplace.json` — the Claude Code and Codex
-  `sgbl` marketplaces that list the same plugin directory.
+  `overseer` marketplaces that list the same plugin directory.
 
 ## Test locally (no publish)
 
@@ -21,24 +21,24 @@ Add this repo as a **local** marketplace and install from your working tree:
 
 ```
 /plugin marketplace add ./overseer --scope local
-/plugin install overseer@sgbl --scope local
+/plugin install overseer@overseer --scope local
 ```
 
-After editing, refresh with `/plugin marketplace update sgbl` then `/plugin update overseer`, then
+After editing, refresh with `/plugin marketplace update overseer` then `/plugin update overseer`, then
 `/reload-plugins` to apply it in the current session — no restart. (A plain `SKILL.md` text edit is
 picked up automatically or with `/reload-skills`; changes under `hooks/` need `/reload-plugins`.)
-Remove with `/plugin uninstall overseer@sgbl --scope local` and
-`/plugin marketplace remove sgbl --scope local`.
+Remove with `/plugin uninstall overseer@overseer --scope local` and
+`/plugin marketplace remove overseer --scope local`.
 
 For Codex:
 
 ```
 codex plugin marketplace add .
-codex plugin add overseer@sgbl
+codex plugin add overseer@overseer
 ```
 
 Open a new thread after install or reinstall so Codex loads the skill. Remove it with
-`codex plugin remove overseer@sgbl` and `codex plugin marketplace remove sgbl`.
+`codex plugin remove overseer@overseer` and `codex plugin marketplace remove overseer`.
 
 ## Validate before you push
 
@@ -163,9 +163,9 @@ exists and stands down, and the `release` workflow handles that path. Note `auto
 release itself rather than leaning on `release.yml`, because a tag pushed by a workflow using the default
 `GITHUB_TOKEN` deliberately does not trigger further workflows.
 
-Claude Code users update with `/plugin marketplace update sgbl` + `/plugin update overseer` +
-`/reload-plugins`. Codex users run `codex plugin marketplace upgrade sgbl` followed by
-`codex plugin add overseer@sgbl`, then open a new thread.
+Claude Code users update with `/plugin marketplace update overseer` + `/plugin update overseer` +
+`/reload-plugins`. Codex users run `codex plugin marketplace upgrade overseer` followed by
+`codex plugin add overseer@overseer`, then open a new thread.
 
 ## Style
 

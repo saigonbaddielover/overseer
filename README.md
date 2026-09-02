@@ -69,14 +69,14 @@ For Claude Code, run inside Claude Code:
 
 ```
 /plugin marketplace add saigonbaddielover/overseer
-/plugin install overseer@sgbl
+/plugin install overseer@overseer
 ```
 
 For Codex, run in a shell:
 
 ```
 codex plugin marketplace add saigonbaddielover/overseer
-codex plugin add overseer@sgbl
+codex plugin add overseer@overseer
 ```
 
 Both install the same skill and `overseer` script. Claude Code also installs the turn-event hooks;
@@ -89,7 +89,7 @@ or *"reply to it with X"*.
 Claude Code:
 
 ```
-/plugin marketplace update sgbl   # re-fetch the marketplace from GitHub
+/plugin marketplace update overseer   # re-fetch the marketplace from GitHub
 /plugin update overseer           # pull the new version into the plugin cache
 /reload-plugins                   # activate it in the current session — no restart
 ```
@@ -97,8 +97,8 @@ Claude Code:
 Codex:
 
 ```
-codex plugin marketplace upgrade sgbl
-codex plugin add overseer@sgbl
+codex plugin marketplace upgrade overseer
+codex plugin add overseer@overseer
 ```
 
 Open a new Codex thread after updating.
@@ -533,9 +533,9 @@ overseer.ps1 doctor --live   # native Windows controller
 
 ## Uninstall
 
-Claude Code: `/plugin uninstall overseer@sgbl`.
+Claude Code: `/plugin uninstall overseer@overseer`.
 
-Codex: `codex plugin remove overseer@sgbl`.
+Codex: `codex plugin remove overseer@overseer`.
 
 ## Development
 
@@ -544,11 +544,11 @@ Clone and add as a **local marketplace**:
 ```
 git clone https://github.com/saigonbaddielover/overseer
 /plugin marketplace add ./overseer
-/plugin install overseer@sgbl
+/plugin install overseer@overseer
 ```
 
 For Codex, use `codex plugin marketplace add ./overseer`, then
-`codex plugin add overseer@sgbl`. Open a new thread after reinstalling the plugin.
+`codex plugin add overseer@overseer`. Open a new thread after reinstalling the plugin.
 
 Validate locally (CI can't run `claude plugin validate` — the CLI isn't on the runner):
 
