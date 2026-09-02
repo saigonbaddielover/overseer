@@ -5,11 +5,20 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.58.0] - 2026-09-02
+
+### Changed
+
+- Canonicalized the public distribution identity to marketplace `overseer` and plugin `overseer@overseer`; install, update, uninstall, and marketplace-management commands now use only the canonical identity.
+- Native Windows command serialization now uses the canonical `Local\overseer-*` mutex namespace.
+- Current documentation, fixtures, exported memory, repository links, and distribution metadata no longer retain pre-canonical naming.
+
+
 ## [0.57.1] - 2026-09-02
 
 ### Changed
 
-- Canonical repository and marketplace source links now use `saigonbaddielover/overseer` after the GitHub repository rename; plugin identity remains `overseer@sgbl`.
+- Canonical repository source links moved to `saigonbaddielover/overseer`; the distribution identity itself was unchanged in that release and was canonicalized later in 0.58.0.
 - The `awaiting-*.txt` screen fixtures are now discovered by glob in both `tests/run.sh` and
   `tests/win-contracts.ps1`, with the expected verdict derived from the fixture name, so a new
   recording is asserted against the Bash and PowerShell awaiting detectors at the same time instead of
@@ -101,8 +110,8 @@ All notable changes to this project are documented here. The format is based on
 
 - **Codex can install and use overseer as a native plugin.** The shared package now carries a Codex
   manifest, a repo marketplace entry, Codex skill UI metadata, and a valid `name` in the skill
-  frontmatter. `codex plugin marketplace add saigonbaddielover/sgbl-overseer` followed by
-  `codex plugin add overseer@sgbl` installs the same skill and scripts Claude Code uses.
+  frontmatter. `codex plugin marketplace add saigonbaddielover/overseer` followed by
+  `codex plugin add overseer@overseer` installs the same skill and scripts Claude Code uses.
 
 ### Changed
 
@@ -133,7 +142,7 @@ All notable changes to this project are documented here. The format is based on
   Not included: `fleet read` fanning out over pane-less sessions. `fleet` is defined as "every agent
   pane", and widening it also widens the `--hosts` fan-out — a separate decision.
 
-[#97]: https://github.com/saigonbaddielover/sgbl-overseer/issues/97
+[#97]: https://github.com/saigonbaddielover/overseer/issues/97
 
 ## [0.50.0] - 2026-08-14
 
@@ -174,7 +183,7 @@ undocumented, unversioned internal protocol — the report's own data (2 of 8 se
 field, split by build) is the evidence — and putting it in the critical path contradicts ADR-0001.
 Revisit if the protocol is ever published.
 
-[#94]: https://github.com/saigonbaddielover/sgbl-overseer/issues/94
+[#94]: https://github.com/saigonbaddielover/overseer/issues/94
 
 ## [0.49.0] - 2026-08-14
 
@@ -206,8 +215,8 @@ Revisit if the protocol is ever published.
   unresolved `-` was also being handed to every remote host, and before the confirmation gate, which
   previously previewed the literal `-` instead of the message being sent.
 
-[#84]: https://github.com/saigonbaddielover/sgbl-overseer/issues/84
-[#88]: https://github.com/saigonbaddielover/sgbl-overseer/issues/88
+[#84]: https://github.com/saigonbaddielover/overseer/issues/84
+[#88]: https://github.com/saigonbaddielover/overseer/issues/88
 
 ## [0.48.0] - 2026-08-12
 
@@ -2060,7 +2069,7 @@ Fixes from a full live + static audit of the interaction surface.
 
 ## [0.1.0] - 2026-07-18
 
-Initial release as a Claude Code plugin distributed via the `sgbl` marketplace.
+Initial release as a Claude Code plugin distributed via the original marketplace identity, later canonicalized in 0.58.0.
 
 ### Added
 - `overseer` script with 11 commands: `list`, `read`, `peek`, `chat`, `send`, `wait`,
@@ -2070,7 +2079,7 @@ Initial release as a Claude Code plugin distributed via the `sgbl` marketplace.
 - Bundled `Stop` hook (`hooks/turn-done.sh`, wired via `hooks/hooks.json`) for event mode — wakes
   `chat`/`wait` the instant a turn ends. Wired automatically on install.
 - Plugin manifest (`.claude-plugin/plugin.json`) and single-plugin marketplace
-  (`.claude-plugin/marketplace.json`, name `sgbl`).
+  (`.claude-plugin/marketplace.json`; its original marketplace identity was later canonicalized in 0.58.0).
 
 ### Notes
 - Linux only (agent discovery reads `/proc`). Requires `tmux` and `jq`.

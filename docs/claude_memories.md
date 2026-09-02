@@ -39,7 +39,7 @@ change both fixes behaviour and adds surface, minor wins.
 
 ### Public repo — no real credentials
 
-`sgbl-overseer` is a **public** GitHub repo. Every tracked file (docs, tests, code, CHANGELOG, commit
+`overseer` is a **public** GitHub repo. Every tracked file (docs, tests, code, CHANGELOG, commit
 messages, PR bodies) is world-readable.
 
 *Why:* on 2026-07-22 real values had crept into *examples* — the real Windows `user@Tailscale-IP` in
@@ -95,16 +95,16 @@ up later; leave them as the standing answer and say nothing about macOS otherwis
 through the interactive `/plugin` menu in the TUI: type `/plugin`, pick the plugin, choose Update.
 `/reload-plugins` afterward (or a restart) loads the new code — it only re-reads on-disk code, it does
 not git-pull the marketplace clone, so it never bumps the version. Verify with
-`jq -r .version ~/.claude/plugins/marketplaces/sgbl/plugins/overseer/.claude-plugin/plugin.json`.
+`jq -r .version ~/.claude/plugins/marketplaces/overseer/plugins/overseer/.claude-plugin/plugin.json`.
 
-**`autoUpdate: true` does not help the session you are in.** The `sgbl` marketplace entry in
+**`autoUpdate: true` does not help the session you are in.** The `overseer` marketplace entry in
 `~/.claude/settings.json` has `"autoUpdate": true` and is configured correctly — but a *running* session
 pins its plugin version: `~/.claude/plugins/cache/<mkt>/<plugin>/<ver>/.in_use/<PID>` holds the PID of
 the live session and Claude Code will not hot-swap the version underneath it. Versions released *during*
 a long-lived session therefore stay invisible to it no matter how many `/reload-plugins` runs. The real
 active version is the cache dir carrying the `.in_use/<CLAUDE_PID>` marker — check that, not the
 marketplace clone. Fix: `/plugin` → Update, **or** just restart Claude Code (a fresh session
-auto-updates). Diagnose with `ls ~/.claude/plugins/cache/sgbl/overseer/*/.in_use/ && echo $CLAUDE_PID`.
+auto-updates). Diagnose with `ls ~/.claude/plugins/cache/overseer/overseer/*/.in_use/ && echo $CLAUDE_PID`.
 
 ---
 

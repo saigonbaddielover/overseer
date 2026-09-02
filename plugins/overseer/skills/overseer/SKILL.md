@@ -517,9 +517,9 @@ Distributed as a Claude Code and Codex plugin. Claude Code:
 
 ```
 /plugin marketplace add saigonbaddielover/overseer
-/plugin install overseer@sgbl
+/plugin install overseer@overseer
 ```
 
 Codex: `codex plugin marketplace add saigonbaddielover/overseer`, then
-`codex plugin add overseer@sgbl`; open a new thread to load the skill. Both install the skill and
+`codex plugin add overseer@overseer`; open a new thread to load the skill. Both install the skill and
 script; only Claude Code loads the event hooks. Requirements and safety notes are in `README.md`.
