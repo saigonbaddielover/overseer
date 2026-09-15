@@ -1,7 +1,7 @@
 {
-  "name": "overseer",
+  "name": "saigonbaddielover",
   "interface": {
-    "displayName": "SGBL"
+    "displayName": "saigonbaddielover"
   },
   "plugins": [
     {
@@ -15,6 +15,29 @@
         "authentication": "ON_INSTALL"
       },
       "category": "Developer Tools"
+    },
+    {
+      "name": "humanize-agent",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/saigonbaddielover/humanize-agent.git",
+        "path": "plugins/humanize-agent",
+        "ref": "codex-release"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools",
+      "description": "Private HumanizeAgent computer-use runtime.",
+      "version": "0.0.10",
+      "license": "MIT",
+      "keywords": [
+        "computer-use",
+        "browser",
+        "humanize",
+        "cua"
+      ]
     }
   ]
 }

@@ -69,36 +69,41 @@ For Claude Code, run inside Claude Code:
 
 ```
 /plugin marketplace add saigonbaddielover/overseer
-/plugin install overseer@overseer
+/plugin install overseer@saigonbaddielover
+/plugin install humanize-agent@saigonbaddielover
 ```
 
 For Codex, run in a shell:
 
 ```
 codex plugin marketplace add saigonbaddielover/overseer
-codex plugin add overseer@overseer
+codex plugin add overseer@saigonbaddielover
+codex plugin add humanize-agent@saigonbaddielover
 ```
 
-Both install the same skill and `overseer` script. Claude Code also installs the turn-event hooks;
-Codex uses the script's transcript polling fallback. Start a new Codex thread after installation so
-the new skill is loaded, then ask things like *"read the latest from the codex in my other tmux pane"*
-or *"reply to it with X"*.
+The `saigonbaddielover` marketplace is the shared catalog for both harnesses. `overseer` remains the
+session-control plugin in this repository; `humanize-agent` is sourced from the private
+`saigonbaddielover/humanize-agent` release channel. Claude Code also installs Overseer's turn-event
+hooks; Codex uses the script's transcript polling fallback. Start a new Codex thread after installation
+so the new skills are loaded.
 
 ## Updating
 
 Claude Code:
 
 ```
-/plugin marketplace update overseer   # re-fetch the marketplace from GitHub
+/plugin marketplace update saigonbaddielover   # re-fetch the marketplace from GitHub
 /plugin update overseer           # pull the new version into the plugin cache
+/plugin update humanize-agent
 /reload-plugins                   # activate it in the current session — no restart
 ```
 
 Codex:
 
 ```
-codex plugin marketplace upgrade overseer
-codex plugin add overseer@overseer
+codex plugin marketplace upgrade saigonbaddielover
+codex plugin add overseer@saigonbaddielover
+codex plugin add humanize-agent@saigonbaddielover
 ```
 
 Open a new Codex thread after updating.
@@ -533,9 +538,9 @@ overseer.ps1 doctor --live   # native Windows controller
 
 ## Uninstall
 
-Claude Code: `/plugin uninstall overseer@overseer`.
+Claude Code: `/plugin uninstall overseer@saigonbaddielover`.
 
-Codex: `codex plugin remove overseer@overseer`.
+Codex: `codex plugin remove overseer@saigonbaddielover`.
 
 ## Development
 
@@ -544,11 +549,11 @@ Clone and add as a **local marketplace**:
 ```
 git clone https://github.com/saigonbaddielover/overseer
 /plugin marketplace add ./overseer
-/plugin install overseer@overseer
+/plugin install overseer@saigonbaddielover
 ```
 
 For Codex, use `codex plugin marketplace add ./overseer`, then
-`codex plugin add overseer@overseer`. Open a new thread after reinstalling the plugin.
+`codex plugin add overseer@saigonbaddielover`. Open a new thread after reinstalling the plugin.
 
 Validate locally (CI can't run `claude plugin validate` — the CLI isn't on the runner):
 
