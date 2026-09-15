@@ -20,7 +20,7 @@
       "name": "humanize-agent",
       "source": {
         "source": "git-subdir",
-        "url": "https://github.com/saigonbaddielover/humanize-agent.git",
+        "url": "https://github.com/saigonbaddielover/computer-access.git",
         "path": "plugins/humanize-agent",
         "ref": "codex-release"
       },
@@ -29,13 +29,36 @@
         "authentication": "ON_INSTALL"
       },
       "category": "Developer Tools",
-      "description": "Private HumanizeAgent computer-use runtime.",
+      "description": "Historical rollback lane for the pre-Computer Access computer-use plugin.",
       "version": "0.0.10",
       "license": "MIT",
       "keywords": [
         "computer-use",
         "browser",
-        "humanize",
+        "legacy",
+        "cua"
+      ]
+    },
+    {
+      "name": "computer-access",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/saigonbaddielover/computer-access.git",
+        "path": "plugins/computer-access",
+        "ref": "plugin-release"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools",
+      "description": "Private Computer Access computer-use runtime built on Cua.",
+      "version": "0.0.1",
+      "license": "MIT",
+      "keywords": [
+        "computer-use",
+        "browser",
+        "computer-access",
         "cua"
       ]
     }

@@ -70,7 +70,7 @@ For Claude Code, run inside Claude Code:
 ```
 /plugin marketplace add saigonbaddielover/overseer
 /plugin install overseer@saigonbaddielover
-/plugin install humanize-agent@saigonbaddielover
+/plugin install computer-access@saigonbaddielover
 ```
 
 For Codex, run in a shell:
@@ -78,12 +78,12 @@ For Codex, run in a shell:
 ```
 codex plugin marketplace add saigonbaddielover/overseer
 codex plugin add overseer@saigonbaddielover
-codex plugin add humanize-agent@saigonbaddielover
+codex plugin add computer-access@saigonbaddielover
 ```
 
 The `saigonbaddielover` marketplace is the shared catalog for both harnesses. `overseer` remains the
-session-control plugin in this repository; `humanize-agent` is sourced from the private
-`saigonbaddielover/humanize-agent` release channel. Claude Code also installs Overseer's turn-event
+session-control plugin in this repository; `computer-access` is sourced from the private
+`saigonbaddielover/computer-access` release channel. Claude Code also installs Overseer's turn-event
 hooks; Codex uses the script's transcript polling fallback. Start a new Codex thread after installation
 so the new skills are loaded.
 
@@ -94,7 +94,7 @@ Claude Code:
 ```
 claude plugin marketplace update saigonbaddielover
 claude plugin update overseer@saigonbaddielover
-claude plugin update humanize-agent@saigonbaddielover
+claude plugin update computer-access@saigonbaddielover
 ```
 
 Then run `/reload-plugins` in the current Claude Code session or start a fresh session.
@@ -104,7 +104,7 @@ Codex:
 ```
 codex plugin marketplace upgrade saigonbaddielover
 codex plugin add overseer@saigonbaddielover
-codex plugin add humanize-agent@saigonbaddielover
+codex plugin add computer-access@saigonbaddielover
 ```
 
 Open a new Codex thread after updating.

@@ -11,7 +11,7 @@
       "source": "./plugins/overseer",
       "category": "development",
       "description": "One agent that oversees others: drive/read Claude Code, Codex, and shell workers from native Windows consoles or Linux tmux panes.",
-      "version": "0.58.1",
+      "version": "0.58.2",
       "license": "MIT",
       "keywords": [
         "tmux",
@@ -26,18 +26,37 @@
       "name": "humanize-agent",
       "source": {
         "source": "git-subdir",
-        "url": "https://github.com/saigonbaddielover/humanize-agent.git",
+        "url": "https://github.com/saigonbaddielover/computer-access.git",
         "path": "plugins/humanize-agent",
         "ref": "codex-release"
       },
       "category": "development",
-      "description": "Private HumanizeAgent computer-use runtime.",
+      "description": "Historical rollback lane for the pre-Computer Access computer-use plugin.",
       "version": "0.0.10",
       "license": "MIT",
       "keywords": [
         "computer-use",
         "browser",
-        "humanize",
+        "legacy",
+        "cua"
+      ]
+    },
+    {
+      "name": "computer-access",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/saigonbaddielover/computer-access.git",
+        "path": "plugins/computer-access",
+        "ref": "plugin-release"
+      },
+      "category": "development",
+      "description": "Private Computer Access computer-use runtime built on Cua.",
+      "version": "0.0.1",
+      "license": "MIT",
+      "keywords": [
+        "computer-use",
+        "browser",
+        "computer-access",
         "cua"
       ]
     }
