@@ -92,11 +92,12 @@ so the new skills are loaded.
 Claude Code:
 
 ```
-/plugin marketplace update saigonbaddielover   # re-fetch the marketplace from GitHub
-/plugin update overseer           # pull the new version into the plugin cache
-/plugin update humanize-agent
-/reload-plugins                   # activate it in the current session — no restart
+claude plugin marketplace update saigonbaddielover
+claude plugin update overseer@saigonbaddielover
+claude plugin update humanize-agent@saigonbaddielover
 ```
+
+Then run `/reload-plugins` in the current Claude Code session or start a fresh session.
 
 Codex:
 
