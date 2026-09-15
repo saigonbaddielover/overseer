@@ -23,25 +23,6 @@
       ]
     },
     {
-      "name": "humanize-agent",
-      "source": {
-        "source": "git-subdir",
-        "url": "https://github.com/saigonbaddielover/computer-access.git",
-        "path": "plugins/humanize-agent",
-        "ref": "codex-release"
-      },
-      "category": "development",
-      "description": "Historical rollback lane for the pre-Computer Access computer-use plugin.",
-      "version": "0.0.10",
-      "license": "MIT",
-      "keywords": [
-        "computer-use",
-        "browser",
-        "legacy",
-        "cua"
-      ]
-    },
-    {
       "name": "computer-access",
       "source": {
         "source": "git-subdir",
