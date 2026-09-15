@@ -51,7 +51,7 @@
       },
       "category": "development",
       "description": "Private Computer Access computer-use runtime built on Cua.",
-      "version": "0.0.1",
+      "version": "0.0.2",
       "license": "MIT",
       "keywords": [
         "computer-use",
