@@ -5,6 +5,10 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.58.1] - 2026-09-15
+
+- Consolidated Codex and Claude Code distribution under the single private marketplace identity `saigonbaddielover`, with both Overseer and HumanizeAgent available from the same catalog.
+
 ## [0.58.0] - 2026-09-02
 
 ### Changed
