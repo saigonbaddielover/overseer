@@ -5,6 +5,10 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.58.4] - 2026-09-15
+
+- Updated the `computer-access` marketplace lane to 0.0.3 after fixing Claude Code plugin runtime-marker verification; both Claude Code and Codex now consume the same final pre-behavior baseline.
+
 ## [0.58.3] - 2026-09-15
 
 - Updated the `computer-access` marketplace lane to 0.0.2 after fixing plugin MCP launch-root resolution.
