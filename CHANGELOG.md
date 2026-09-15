@@ -5,6 +5,10 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.58.3] - 2026-09-15
+
+- Updated the `computer-access` marketplace lane to 0.0.2 after fixing plugin MCP launch-root resolution.
+
 ## [0.58.2] - 2026-09-15
 
 - Added the `computer-access` 0.0.1 plugin lane from `saigonbaddielover/computer-access` through the shared marketplace, with the previous plugin retained temporarily as a frozen rollback lane during migration.

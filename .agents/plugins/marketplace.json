@@ -14,7 +14,8 @@
         "installation": "AVAILABLE",
         "authentication": "ON_INSTALL"
       },
-      "category": "Developer Tools"
+      "category": "Developer Tools",
+      "version": "0.58.3"
     },
     {
       "name": "humanize-agent",
@@ -53,7 +54,7 @@
       },
       "category": "Developer Tools",
       "description": "Private Computer Access computer-use runtime built on Cua.",
-      "version": "0.0.1",
+      "version": "0.0.2",
       "license": "MIT",
       "keywords": [
         "computer-use",
