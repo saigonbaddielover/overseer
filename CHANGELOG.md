@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.58.2] - 2026-09-15
+
 - Added the `computer-access` 0.0.1 plugin lane from `saigonbaddielover/computer-access` through the shared marketplace, with the previous plugin retained temporarily as a frozen rollback lane during migration.
 
 ## [0.58.1] - 2026-09-15
