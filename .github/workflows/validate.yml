@@ -36,6 +36,10 @@ jobs:
           test "$(jq -r '.plugins[] | select(.name=="overseer") | .source.path' .agents/plugins/marketplace.json)" = "./plugins/overseer"
           test "$(jq -r .skills plugins/overseer/.codex-plugin/plugin.json)" = "./skills/"
 
+      - name: product release is isolated from catalog-only changes
+        if: github.event_name == 'pull_request'
+        run: python3 tests/check-release-isolation.py --base-ref "origin/${{ github.base_ref }}"
+
       - name: a version bump must bring a CHANGELOG entry
         if: github.event_name == 'pull_request'
         run: |

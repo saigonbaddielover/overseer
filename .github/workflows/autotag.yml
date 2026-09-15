@@ -26,6 +26,10 @@ jobs:
             echo "::error::claude plugin ($pv), codex plugin ($cv), and marketplace ($mv) disagree — refusing to tag"
             exit 1
           fi
+          previous=$(git tag --list 'overseer--v*' --sort=-v:refname | head -n1)
+          if [ -n "$previous" ]; then
+            python3 tests/check-release-isolation.py --base-ref "$previous"
+          fi
           tag="overseer--v$pv"
           if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
             echo "$tag already exists"
