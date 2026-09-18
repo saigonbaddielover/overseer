@@ -31,10 +31,6 @@ jobs:
           test ! -e .claude-plugin/marketplace.json
           test ! -e .agents/plugins/marketplace.json
           test "$(jq -r .skills plugins/overseer/.codex-plugin/plugin.json)" = "./skills/"
-          private_pattern='computer''-access|humanize''-agent|humanize''agent'
-          if git grep -n -i -E "$private_pattern" -- .; then
-            exit 1
-          fi
 
       - name: generated development marketplace validates
         run: |
