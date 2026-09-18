@@ -15,7 +15,7 @@ jobs:
 
       - name: JSON manifests are valid
         run: |
-          for f in plugins/overseer/.claude-plugin/plugin.json                    plugins/overseer/.codex-plugin/plugin.json                    plugins/overseer/hooks/hooks.json; do
+          for f in plugins/overseer/.claude-plugin/plugin.json plugins/overseer/.codex-plugin/plugin.json plugins/overseer/hooks/hooks.json; do
             echo "jq: $f"; jq empty "$f"
           done
 
