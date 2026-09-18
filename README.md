@@ -67,45 +67,40 @@ or a visible console broker using Win32 console I/O on Windows.
 
 For Claude Code, run inside Claude Code:
 
-```
-/plugin marketplace add saigonbaddielover/overseer
+~~~
+/plugin marketplace add saigonbaddielover/plugins
 /plugin install overseer@saigonbaddielover
-/plugin install computer-access@saigonbaddielover
-```
+~~~
 
 For Codex, run in a shell:
 
-```
-codex plugin marketplace add saigonbaddielover/overseer
+~~~
+codex plugin marketplace add saigonbaddielover/plugins
 codex plugin add overseer@saigonbaddielover
-codex plugin add computer-access@saigonbaddielover
-```
+~~~
 
-The `saigonbaddielover` marketplace is the shared catalog for both harnesses. `overseer` remains the
-session-control plugin in this repository; `computer-access` is sourced from the private
-`saigonbaddielover/computer-access` release channel. Claude Code also installs Overseer's turn-event
-hooks; Codex uses the script's transcript polling fallback. Start a new Codex thread after installation
-so the new skills are loaded.
+The canonical public marketplace is hosted by saigonbaddielover/plugins; this repository owns only
+the Overseer plugin source and release channel. Claude Code also installs Overseer's turn-event hooks;
+Codex uses the script's transcript polling fallback. Start a new Codex thread after installation so the
+new skills are loaded.
 
 ## Updating
 
 Claude Code:
 
-```
+~~~
 claude plugin marketplace update saigonbaddielover
 claude plugin update overseer@saigonbaddielover
-claude plugin update computer-access@saigonbaddielover
-```
+~~~
 
-Then run `/reload-plugins` in the current Claude Code session or start a fresh session.
+Then run /reload-plugins in the current Claude Code session or start a fresh session.
 
 Codex:
 
-```
+~~~
 codex plugin marketplace upgrade saigonbaddielover
 codex plugin add overseer@saigonbaddielover
-codex plugin add computer-access@saigonbaddielover
-```
+~~~
 
 Open a new Codex thread after updating.
 
@@ -545,40 +540,44 @@ Codex: `codex plugin remove overseer@saigonbaddielover`.
 
 ## Development
 
-Clone and add as a **local marketplace**:
+Clone the repository, generate the disposable development marketplace, and install from that working
+tree:
 
-```
+~~~bash
 git clone https://github.com/saigonbaddielover/overseer
-/plugin marketplace add ./overseer
-/plugin install overseer@saigonbaddielover
-```
+cd overseer
+python3 tests/make-dev-marketplace.py
+~~~
 
-For Codex, use `codex plugin marketplace add ./overseer`, then
-`codex plugin add overseer@saigonbaddielover`. Open a new thread after reinstalling the plugin.
+Claude Code:
 
-Validate locally (CI can't run `claude plugin validate` — the CLI isn't on the runner):
+~~~
+/plugin marketplace add ./.tmp/dev-marketplace
+/plugin install overseer@overseer-dev
+~~~
 
-```
-claude plugin validate --strict ./overseer
+Codex:
+
+~~~bash
+codex plugin marketplace add ./.tmp/dev-marketplace
+codex plugin add overseer@overseer-dev
+~~~
+
+After edits, rerun the generator, refresh/reinstall the plugin, and open a new Codex thread when testing
+Codex skill discovery.
+
+Validate locally:
+
+~~~bash
+python3 tests/make-dev-marketplace.py
+claude plugin validate --strict ./plugins/overseer
+claude plugin validate --strict ./.tmp/dev-marketplace
 bash tests/run.sh
-```
+~~~
 
-Releasing is automatic: bump the version in **both** manifests, land the PR, and the `autotag` workflow
-tags `overseer--v<version>` on `main` and publishes the GitHub Release. On a **pull request** CI fails a
-version bump that arrives without a matching `CHANGELOG.md` heading (the check compares against the base
-branch, so it only runs there).
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the branch → PR → merge flow (`main` is protected). Design
-notes: [why overseer stays one bash program](docs/DECISIONS.md) · [driving a remote Windows
-console](docs/WINDOWS.md) · [porting beyond Linux](docs/PORTING.md).
-
-### Useful Claude Code commands
-
-- `/reload-plugins` — apply an overseer update or a local `hooks/`/skill edit in the current session, no restart.
-- `/reload-skills` — pick up a `SKILL.md` text edit on disk.
-- `/hooks` — confirm the bundled `Stop` hook (`turn-done.sh`) is wired.
-- `/plugin` — enable / disable / inspect / update overseer interactively.
-- `/release-notes` — see what changed when Claude Code itself updates (the upstream this reads).
+Releasing is automatic: bump the version in both plugin manifests, land the PR, and the autotag
+workflow tags overseer--v<version>, publishes the GitHub Release, then advances plugin-release to that
+release commit. On a pull request CI fails a version bump without a matching CHANGELOG.md heading.
 
 ## License
 

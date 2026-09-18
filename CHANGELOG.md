@@ -5,21 +5,30 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.58.5] - 2026-09-18
+
+### Changed
+
+- Moved canonical marketplace ownership to the dedicated public saigonbaddielover/plugins catalog.
+- Added the release-gated plugin-release publication ref so marketplace installs never track development main.
+- Removed the product repository's root marketplace manifests; local development now generates a disposable marketplace under .tmp/.
+
+
 ## [0.58.4] - 2026-09-15
 
-- Updated the `computer-access` marketplace lane to 0.0.3 after fixing Claude Code plugin runtime-marker verification; both Claude Code and Codex now consume the same final pre-behavior baseline.
+- Catalog-only distribution maintenance; the Overseer plugin artifact was unchanged.
 
 ## [0.58.3] - 2026-09-15
 
-- Updated the `computer-access` marketplace lane to 0.0.2 after fixing plugin MCP launch-root resolution.
+- Catalog-only distribution maintenance; the Overseer plugin artifact was unchanged.
 
 ## [0.58.2] - 2026-09-15
 
-- Added the `computer-access` 0.0.1 plugin lane from `saigonbaddielover/computer-access` through the shared marketplace, with the previous plugin retained temporarily as a frozen rollback lane during migration.
+- Catalog-only distribution maintenance; the Overseer plugin artifact was unchanged.
 
 ## [0.58.1] - 2026-09-15
 
-- Consolidated Codex and Claude Code distribution under the single private marketplace identity `saigonbaddielover`, with both Overseer and HumanizeAgent available from the same catalog.
+- Consolidated Claude Code and Codex installation under the shared marketplace identity used at that time.
 
 ## [0.58.0] - 2026-09-02
 

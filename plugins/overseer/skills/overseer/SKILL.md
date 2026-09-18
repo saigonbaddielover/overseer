@@ -516,10 +516,10 @@ installed just polls — the same safe fallback, ~2s slower, never blocked.
 Distributed as a Claude Code and Codex plugin. Claude Code:
 
 ```
-/plugin marketplace add saigonbaddielover/overseer
+/plugin marketplace add saigonbaddielover/plugins
 /plugin install overseer@saigonbaddielover
 ```
 
-Codex: `codex plugin marketplace add saigonbaddielover/overseer`, then
+Codex: `codex plugin marketplace add saigonbaddielover/plugins`, then
 `codex plugin add overseer@saigonbaddielover`; open a new thread to load the skill. Both install the skill and
 script; only Claude Code loads the event hooks. Requirements and safety notes are in `README.md`.

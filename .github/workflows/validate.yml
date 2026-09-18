@@ -15,26 +15,32 @@ jobs:
 
       - name: JSON manifests are valid
         run: |
-          for f in .claude-plugin/marketplace.json \
-                   .agents/plugins/marketplace.json \
-                   plugins/overseer/.claude-plugin/plugin.json \
-                   plugins/overseer/.codex-plugin/plugin.json \
-                   plugins/overseer/hooks/hooks.json; do
+          for f in plugins/overseer/.claude-plugin/plugin.json                    plugins/overseer/.codex-plugin/plugin.json                    plugins/overseer/hooks/hooks.json; do
             echo "jq: $f"; jq empty "$f"
           done
 
-      - name: plugin.json and marketplace entry versions agree
+      - name: plugin manifest versions agree
         run: |
           pv=$(jq -r .version plugins/overseer/.claude-plugin/plugin.json)
           cv=$(jq -r .version plugins/overseer/.codex-plugin/plugin.json)
-          mv=$(jq -r '.plugins[] | select(.name=="overseer") | .version' .claude-plugin/marketplace.json)
-          echo "claude=$pv codex=$cv marketplace=$mv"
-          test -n "$pv" && test "$pv" = "$cv" && test "$pv" = "$mv"
+          echo "claude=$pv codex=$cv"
+          test -n "$pv" && test "$pv" = "$cv"
 
-      - name: Codex marketplace points at the shared plugin
+      - name: product repository is not a marketplace
         run: |
-          test "$(jq -r '.plugins[] | select(.name=="overseer") | .source.path' .agents/plugins/marketplace.json)" = "./plugins/overseer"
+          test ! -e .claude-plugin/marketplace.json
+          test ! -e .agents/plugins/marketplace.json
           test "$(jq -r .skills plugins/overseer/.codex-plugin/plugin.json)" = "./skills/"
+          private_pattern='computer''-access|humanize''-agent|humanize''agent'
+          if git grep -n -i -E "$private_pattern" -- .; then
+            exit 1
+          fi
+
+      - name: generated development marketplace validates
+        run: |
+          python3 tests/make-dev-marketplace.py
+          jq empty .tmp/dev-marketplace/.claude-plugin/marketplace.json
+          jq empty .tmp/dev-marketplace/.agents/plugins/marketplace.json
 
       - name: product release is isolated from catalog-only changes
         if: github.event_name == 'pull_request'
