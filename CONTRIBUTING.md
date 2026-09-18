@@ -12,39 +12,40 @@
   brokers without SSH and carries PowerShell equivalents of the transcript/turn orchestration seam.
 - `skills/overseer/scripts/win-*.ps1` — the PowerShell payloads copied to a Windows host on demand;
   see [docs/WINDOWS.md](docs/WINDOWS.md) for the mechanism and its non-obvious constraints.
-- `.claude-plugin/marketplace.json` and `.agents/plugins/marketplace.json` — the Claude Code and Codex
-  `overseer` marketplaces that list the same plugin directory.
+- `tests/make-dev-marketplace.py` — generates the gitignored local marketplace used to test the
+  working-tree plugin without making this product repository a distribution catalog.
 
 ## Test locally (no publish)
 
-Add this repo as a **local** marketplace and install from your working tree:
+Generate the disposable local marketplace and install from the copied working-tree artifact:
 
-```
-/plugin marketplace add ./overseer --scope local
-/plugin install overseer@overseer --scope local
-```
+~~~
+python3 tests/make-dev-marketplace.py
+/plugin marketplace add ./.tmp/dev-marketplace --scope local
+/plugin install overseer@overseer-dev --scope local
+~~~
 
-After editing, refresh with `/plugin marketplace update overseer` then `/plugin update overseer`, then
-`/reload-plugins` to apply it in the current session — no restart. (A plain `SKILL.md` text edit is
-picked up automatically or with `/reload-skills`; changes under `hooks/` need `/reload-plugins`.)
-Remove with `/plugin uninstall overseer@overseer --scope local` and
-`/plugin marketplace remove overseer --scope local`.
+After editing, rerun the generator, refresh the marketplace, reinstall the plugin, then run
+/reload-plugins. Remove it with /plugin uninstall overseer@overseer-dev --scope local and
+/plugin marketplace remove overseer-dev --scope local.
 
 For Codex:
 
-```
-codex plugin marketplace add .
-codex plugin add overseer@overseer
-```
+~~~
+python3 tests/make-dev-marketplace.py
+codex plugin marketplace add ./.tmp/dev-marketplace
+codex plugin add overseer@overseer-dev
+~~~
 
 Open a new thread after install or reinstall so Codex loads the skill. Remove it with
-`codex plugin remove overseer@overseer` and `codex plugin marketplace remove overseer`.
+codex plugin remove overseer@overseer-dev and codex plugin marketplace remove overseer-dev.
 
 ## Validate before you push
 
 ```
 claude plugin validate --strict ./plugins/overseer   # the plugin
-claude plugin validate --strict .             # the marketplace
+python3 tests/make-dev-marketplace.py
+claude plugin validate --strict .tmp/dev-marketplace
 python3 "${CODEX_HOME:-$HOME/.codex}/skills/.system/plugin-creator/scripts/validate_plugin.py" plugins/overseer
 python3 "${CODEX_HOME:-$HOME/.codex}/skills/.system/skill-creator/scripts/quick_validate.py" plugins/overseer/skills/overseer
 bash -n plugins/overseer/skills/overseer/scripts/overseer plugins/overseer/skills/overseer/scripts/lib/*.sh
@@ -148,8 +149,7 @@ gh pr create --fill
 
 ## Release
 
-1. On a branch, bump `version` in both `plugins/overseer` manifests and the
-   `.claude-plugin/marketplace.json` entry (they must match — CI and release automation enforce it).
+1. On a branch, bump `version` in both `plugins/overseer` manifests; CI and release automation require them to match.
 2. Move the `Unreleased` notes in `CHANGELOG.md` under the new version + date. CI **fails the PR** if the
    version changed without a matching `## [x.y.z]` heading.
 3. Open the PR, get CI green, merge to `main`.
@@ -163,9 +163,9 @@ exists and stands down, and the `release` workflow handles that path. Note `auto
 release itself rather than leaning on `release.yml`, because a tag pushed by a workflow using the default
 `GITHUB_TOKEN` deliberately does not trigger further workflows.
 
-Claude Code users update with `/plugin marketplace update overseer` + `/plugin update overseer` +
-`/reload-plugins`. Codex users run `codex plugin marketplace upgrade overseer` followed by
-`codex plugin add overseer@overseer`, then open a new thread.
+Claude Code users update with `/plugin marketplace update saigonbaddielover` + `/plugin update overseer@saigonbaddielover` +
+`/reload-plugins`. Codex users run `codex plugin marketplace upgrade saigonbaddielover` followed by
+`codex plugin add overseer@saigonbaddielover`, then open a new thread.
 
 ## Style
 

@@ -21,9 +21,8 @@ jobs:
         run: |
           pv=$(jq -r .version plugins/overseer/.claude-plugin/plugin.json)
           cv=$(jq -r .version plugins/overseer/.codex-plugin/plugin.json)
-          mv=$(jq -r '.plugins[] | select(.name=="overseer") | .version' .claude-plugin/marketplace.json)
-          if [ "$pv" != "$cv" ] || [ "$pv" != "$mv" ]; then
-            echo "::error::claude plugin ($pv), codex plugin ($cv), and marketplace ($mv) disagree — refusing to tag"
+          if [ "$pv" != "$cv" ]; then
+            echo "::error::claude plugin ($pv) and codex plugin ($cv) disagree — refusing to tag"
             exit 1
           fi
           previous=$(git tag --list 'overseer--v*' --sort=-v:refname | head -n1)
@@ -39,8 +38,15 @@ jobs:
             echo "tagged $tag"
           fi
           if gh release view "$tag" >/dev/null 2>&1; then
-            echo "release $tag already published — nothing to do"
-            exit 0
+            echo "release $tag already published"
+          else
+            gh release create "$tag" --generate-notes --latest --verify-tag
+            echo "released $tag"
           fi
-          gh release create "$tag" --generate-notes --latest --verify-tag
-          echo "released $tag"
+          release_sha=$(git rev-parse "$tag^{commit}")
+          git fetch origin plugin-release:refs/remotes/origin/plugin-release || true
+          if git rev-parse --verify refs/remotes/origin/plugin-release >/dev/null 2>&1; then
+            git merge-base --is-ancestor refs/remotes/origin/plugin-release "$release_sha"
+          fi
+          git push origin "$release_sha:refs/heads/plugin-release"
+          echo "published plugin-release at $release_sha"

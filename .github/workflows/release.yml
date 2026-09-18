@@ -13,15 +13,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - name: the tag must match both manifests and the changelog
         run: |
           tv=${GITHUB_REF_NAME#overseer--v}
           pv=$(jq -r .version plugins/overseer/.claude-plugin/plugin.json)
           cv=$(jq -r .version plugins/overseer/.codex-plugin/plugin.json)
-          mv=$(jq -r '.plugins[] | select(.name=="overseer") | .version' .claude-plugin/marketplace.json)
-          echo "tag=$tv claude=$pv codex=$cv marketplace=$mv"
-          if [ "$tv" != "$pv" ] || [ "$tv" != "$cv" ] || [ "$tv" != "$mv" ]; then
-            echo "::error::tag $GITHUB_REF_NAME does not match claude ($pv) / codex ($cv) / marketplace ($mv)"
+          echo "tag=$tv claude=$pv codex=$cv"
+          if [ "$tv" != "$pv" ] || [ "$tv" != "$cv" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match claude ($pv) / codex ($cv)"
             exit 1
           fi
           if ! grep -q "^## \[$tv\]" CHANGELOG.md; then
@@ -34,6 +35,12 @@ jobs:
         run: |
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             echo "release $GITHUB_REF_NAME already published"
-            exit 0
+          else
+            gh release create "$GITHUB_REF_NAME" --generate-notes --latest --verify-tag
           fi
-          gh release create "$GITHUB_REF_NAME" --generate-notes --latest --verify-tag
+          release_sha=$(git rev-parse "$GITHUB_REF_NAME^{commit}")
+          git fetch origin plugin-release:refs/remotes/origin/plugin-release || true
+          if git rev-parse --verify refs/remotes/origin/plugin-release >/dev/null 2>&1; then
+            git merge-base --is-ancestor refs/remotes/origin/plugin-release "$release_sha"
+          fi
+          git push origin "$release_sha:refs/heads/plugin-release"
